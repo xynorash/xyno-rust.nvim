@@ -150,6 +150,8 @@ XYNO_LAZY=/path/to/lazy.nvim nvim --headless -u tests/e2e/init.lua -c "luafile t
 
 Specs that need cargo, rust-analyzer or a tree-sitter parser skip with a message when it is missing. CI builds the two parsers from pinned commits.
 
+What is not covered here: the original xynovim specs ran `:RustRestart` and the status line against a live bacon-ls next to rust-analyzer (kill -9 of both servers, SIGSTOP-ed hung servers, repeated quick kills, FocusGained restarts). Those cases were not ported, so the restart and sweep logic has no real-process spec in this repository.
+
 ## License
 
 MIT, Copyright (c) 2026 Xynorash.
