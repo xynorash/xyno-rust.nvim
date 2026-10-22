@@ -1,0 +1,62 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  NVIM_VERSION: v0.12.5
+  NVIM_SHA256: bce0f56eda1f1b1db6eee8f4133d7a38813ea07933837dd1777411ca384c6875
+  LAZY_SHA: 85c7ff3711b730b4030d03144f6db6375044ae82 # lazy.nvim v11.17.5
+  TS_RUST_SHA: 77a3747266f4d621d0757825e6b11edcbf991ca5 # tree-sitter-rust
+  TS_YAML_SHA: a1c4812a73ec5e089de8e441fdea3a921e8d5079 # tree-sitter-yaml
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install Neovim (pinned, checksum verified)
+        run: |
+          curl -fsSL -o nvim.tar.gz "https://github.com/neovim/neovim/releases/download/${NVIM_VERSION}/nvim-linux-x86_64.tar.gz"
+          echo "${NVIM_SHA256}  nvim.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/nvim"
+          tar -xzf nvim.tar.gz -C "$HOME/nvim" --strip-components=1
+          echo "$HOME/nvim/bin" >> "$GITHUB_PATH"
+
+      - name: Add rust-analyzer
+        run: rustup component add rust-analyzer
+
+      - name: Build the tree-sitter parsers (pinned commits)
+        run: |
+          build() {
+            d="$RUNNER_TEMP/ts-$1"
+            git init -q "$d"
+            git -C "$d" fetch -q --depth 1 "$2" "$3"
+            git -C "$d" checkout -q FETCH_HEAD
+            mkdir -p "$RUNNER_TEMP/ts/parser"
+            cc -shared -fPIC -O2 -I "$d/src" "$d/src/parser.c" "$d/src/scanner.c" -o "$RUNNER_TEMP/ts/parser/$1.so"
+          }
+          build rust https://github.com/tree-sitter/tree-sitter-rust "${TS_RUST_SHA}"
+          build yaml https://github.com/tree-sitter-grammars/tree-sitter-yaml "${TS_YAML_SHA}"
+
+      - name: Specs
+        run: XYNO_TEST_RTP="$RUNNER_TEMP/ts" nvim -l tests/run.lua
+
+      - name: Fetch lazy.nvim (pinned commit)
+        run: |
+          git init -q "$RUNNER_TEMP/lazy.nvim"
+          git -C "$RUNNER_TEMP/lazy.nvim" fetch -q --depth 1 https://github.com/folke/lazy.nvim.git "${LAZY_SHA}"
+          git -C "$RUNNER_TEMP/lazy.nvim" checkout -q FETCH_HEAD
+
+      - name: Smoke test through lazy.nvim
+        run: |
+          XYNO_LAZY="$RUNNER_TEMP/lazy.nvim" nvim --headless -u tests/e2e/init.lua -c "luafile tests/e2e/smoke.lua"

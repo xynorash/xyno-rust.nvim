@@ -1,0 +1,326 @@
+*xyno-rust.txt*  Rust project plumbing for Neovim: Cargo context, targets, routes, server handling
+
+                              xyno-rust.nvim
+
+==============================================================================
+CONTENTS                                                      *xyno-rust-contents*
+
+  1. Introduction ............................. |xyno-rust|
+  2. Requirements ............................. |xyno-rust-requirements|
+  3. Setup and options ........................ |xyno-rust-setup|
+  4. Commands ................................. |xyno-rust-commands|
+  5. Keymaps .................................. |xyno-rust-keymaps|
+  6. Lua API .................................. |xyno-rust-api|
+  7. Wiring it to the language servers ........ |xyno-rust-wiring|
+  8. How it works ............................. |xyno-rust-how|
+  9. Platforms ................................ |xyno-rust-platforms|
+ 10. License and origin ....................... |xyno-rust-license|
+
+==============================================================================
+1. INTRODUCTION                                                      *xyno-rust*
+
+xyno-rust.nvim is the shared base of my Rust setup. It holds:
+
+  - a per-project Cargo context (features and target) that rust-analyzer and
+    bacon-ls can both follow (|xyno_rust.rust_context|),
+  - a Cargo targets and tools picker, `cargo new`, and `act` for the GitHub
+    Actions job under the cursor (|xyno_rust.rust_tasks|),
+  - an HTTP route picker for axum, actix and rocket projects
+    (|xyno_rust.rust_routes|),
+  - go to super method and reads/writes of a symbol in the file
+    (|xyno_rust.rust_nav|),
+  - restart handling for rust-analyzer and bacon-ls (|xyno_rust.rust_restart|),
+  - a readiness indicator for the statusline (|xyno_rust.lsp_status|),
+  - helpers other plugins build on: |xyno_rust.code_actions|,
+    |xyno_rust.crate_meta| and |xyno_rust.fsutil|.
+
+The Cargo context and the tools picker are inspired by the Cargo tool window
+of the JetBrains IDEs, which I still use. This plugin is independent and not
+affiliated with JetBrains.
+
+Each module can be required on its own; setup() only wires the commands and
+autocommands.
+
+==============================================================================
+2. REQUIREMENTS                                              *xyno-rust-requirements*
+
+  - Neovim 0.12 or newer.
+  - `cargo` in $PATH for everything that reads a workspace.
+  - rust-analyzer started through |vim.lsp| (for example by rustaceanvim) for
+    |xyno_rust.rust_nav|, |xyno_rust.code_actions| and the live parts of
+    |xyno_rust.rust_context|.
+  - The tree-sitter `rust` parser for |:RustRoutes| and |xyno_rust.rust_nav|;
+    the `yaml` parser for |:ActJob|.
+  - snacks.nvim (picker and terminal) for |:RustContext|, |:RustTargets|,
+    |:RustTools|, |:RustRoutes| and the terminal runs. Without it those
+    commands print one error line and do nothing else.
+  - Optional external tools, only for the entries that call them: `rustup`,
+    `samply`, `cargo-flamegraph`, `cargo-bloat`, `cargo-machete`,
+    `cargo-deny`, `cargo-audit`, `cargo-llvm-cov`, `act`, `curl` (crates.io
+    client in |xyno_rust.crate_meta|), bacon-ls.
+
+No other plugin is required.
+
+==============================================================================
+3. SETUP AND OPTIONS                                              *xyno-rust-setup*
+
+>lua
+    require("xyno_rust").setup({
+      commands = true, -- :RustContext :RustTargets :RustTools :ActJob :RustNew
+                       -- :RustRoutes :RustRestart
+      keymaps = false, -- false | true | { context = lhs, targets = lhs, ... }
+      modules = {
+        context = true, -- xyno_rust.rust_context
+        tasks = true,   -- xyno_rust.rust_tasks
+        routes = true,  -- xyno_rust.rust_routes
+        status = true,  -- xyno_rust.lsp_status (autocommands)
+        restart = true, -- xyno_rust.rust_restart (autocommands)
+      },
+    })
+<
+
+                                                              *xyno-rust-opts*
+commands    boolean, default true. Define the user commands. The
+            autocommands of the status and restart modules are set either way.
+keymaps     false (default): no key is set. true: the defaults of
+            |xyno-rust-keymaps|. A table maps the named actions to the keys
+            you give; only the listed actions are mapped, `false` skips one.
+            The keys are buffer-local, in Rust buffers.
+modules     Switch single modules off. A module that is off defines no
+            command and no autocommand.
+
+setup() needs Neovim 0.12; on an older one it prints one error line and does
+nothing. Calling it again replaces the autocommands.
+
+==============================================================================
+4. COMMANDS                                                    *xyno-rust-commands*
+
+                                                                  *:RustContext*
+:RustContext            Pick Cargo features (multi-select with <Tab>), then a
+                        target; applies it to the running rust-analyzer and
+                        bacon-ls and stores it per workspace.
+:RustContext show       Print the context of the current workspace.
+:RustContext reset      Forget the stored choice (all features, host target).
+
+                                                                  *:RustTargets*
+:RustTargets            Pick a target of the workspace (bin, example, test,
+                        bench, lib) and run, test, build, bench, profile it in
+                        a bottom terminal. Honours |:RustContext|.
+
+                                                                    *:RustTools*
+:RustTools              Pick a workspace tool: timings, bloat, machete, deny,
+                        audit, duplicate versions, coverage summary.
+
+                                                                    *:RustRoutes*
+:RustRoutes             Pick an HTTP route (axum `.route("/p", ..)`, actix and
+                        rocket `#[get("/p")]`) and jump to it.
+
+                                                                     *:RustNew*
+:RustNew [name]         `cargo new` (bin or lib) in the current directory and
+                        open the new crate.
+
+                                                                      *:ActJob*
+:ActJob                 Run the GitHub Actions job under the cursor with `act`.
+
+                                                                  *:RustRestart*
+:RustRestart            Restart rust-analyzer and bacon-ls, also when one of
+                        them has died.
+
+==============================================================================
+5. KEYMAPS                                                      *xyno-rust-keymaps*
+
+No key is set by default. With `keymaps = true`, buffer-local in Rust files:
+
+    context       <leader>rF   |:RustContext|
+    targets       <leader>rX   |:RustTargets|
+    tools         <leader>rZ   |:RustTools|
+    routes        <leader>rN   |:RustRoutes|
+    goto_super    <leader>ru   |xyno_rust.rust_nav|
+    local_usages  <leader>rl   |xyno_rust.rust_nav|
+    doctests      <leader>tD   |xyno_rust.rust_tasks|
+
+Or define them in the lazy.nvim spec with `ft = "rust"` (see the README).
+
+==============================================================================
+6. LUA API                                                          *xyno-rust-api*
+
+All modules are under `xyno_rust`. Functions that can wait come in pairs,
+`name_async(..., cb)` and a blocking `name(...)`.
+
+xyno_rust                                                           *xyno_rust*
+    setup({opts})                    see |xyno-rust-setup|
+    defaults                         the default options table
+    default_keymaps                  action name -> default lhs
+
+xyno_rust.fsutil                                              *xyno_rust.fsutil*
+    rename({tmp}, {dest})            uv.fs_rename that retries on Windows
+                                     (sharing violations); returns what
+                                     fs_rename returns
+    slash({path})                    forward slashes (Windows only)
+
+xyno_rust.rust_context                                  *xyno_rust.rust_context*
+    root({path}?)                    workspace root of a path (default: the
+                                     current buffer); nil outside a crate
+    get({root})                      stored context or nil
+    apply({root}, {ctx}?)            store {ctx} (nil resets), push it into the
+                                     running servers, notify
+    pick()                           the |:RustContext| picker
+    reset()                          |:RustContext| reset
+    describe({ctx}?)                 "features: ssr,csr | target: ..."
+    ra_cargo({ctx}?)                 `rust-analyzer.cargo` settings table
+    cargo_flags({ctx}?)              {"--all-features", ...} for cargo
+    bacon_args({ctx}?)               extraArgs for bacon-ls
+    canon({path})                    one spelling of a root (Windows)
+    A context is { all = boolean, no_default = boolean, features = string[],
+    target = string? }. Nothing stored means all features, host target. The
+    state is kept in `stdpath("state")/rust-context.json`, written under a
+    lock file and renamed into place.
+
+xyno_rust.rust_tasks                                      *xyno_rust.rust_tasks*
+    targets()  tools()  new({name}?)  act_job()  doctests()
+    samply_cmd({build}, {bin})       argv for "build, then samply record"
+
+xyno_rust.rust_routes                                    *xyno_rust.rust_routes*
+    scan_source({src})               routes of a Rust source string, as
+                                     { path, kind, detail, row, col }
+    collect({root})                  routes of every .rs file of a workspace
+    pick()                           the |:RustRoutes| picker
+
+xyno_rust.rust_nav                                          *xyno_rust.rust_nav*
+    goto_super()                     from a method in `impl Trait for T` to
+                                     the trait's method
+    local_usages()                   reads and writes of the symbol under the
+                                     cursor, labelled [R] [W] [T], in the
+                                     quickfix list
+
+xyno_rust.lsp_status                                      *xyno_rust.lsp_status*
+    component()                      "deps resolving | RA ready | clippy ok",
+                                     "" outside Rust buffers; for a statusline
+    rust_analyzer({bufnr}?)  bacon({bufnr}?)  deps({bufnr}?)
+    bacon_failed({client_id})
+    deps_begin({root}, {buf}?)  deps_clear({root}?)
+    setup()                          autocommands (event driven, no timers
+                                     while idle)
+
+xyno_rust.rust_restart                                  *xyno_rust.rust_restart*
+    on_exit({name})                  returns an on_exit callback that restarts
+                                     the server `name` ("rust-analyzer" or
+                                     "bacon_ls") after a crash, at most three
+                                     times a minute
+    restart()                        |:RustRestart|
+    sweep()  check_shadow()  manifest_saved({file}, {buf}?)
+    server_pids()  kill_survivors({pids}, {ms}?)
+    kill_uninitialised()  resume_servers()
+    setup()
+
+xyno_rust.code_actions                                  *xyno_rust.code_actions*
+    request({bufnr}, {range}, {opts}, {cb})
+    request_wait({bufnr}, {range}, {opts})
+    wait_for({bufnr}, {range}, {spec}, {opts})
+    filter({list}, {spec})
+    apply({action}, {opts})  apply_async({action}, {cb}, {opts})
+    apply_all({actions}, {opts})  resolve_async({action}, {cb}, {opts})
+    clients({bufnr})  client_name
+    Positions are 0-based { row, col } with a byte column. An action is
+    { title, kind, is_preferred, edit, command, data, raw, client_id,
+    client_name, bufnr }.
+
+xyno_rust.crate_meta                                      *xyno_rust.crate_meta*
+    metadata({root}, {opts}) metadata_async({root}, {cb}, {opts})
+    invalidate({root}?)  normalize({raw}, {root})
+    dependencies({meta}, {filter})  member_of({meta}, {path})  root({path}?)
+    registry_dir({name}, {version}?)  source_dir({root}, {name}, {version}?)
+    read_manifest({dir})  read_lib({dir})  parse_features({toml})
+    info({name}, {opts}) info_async  search({query}, {opts}) search_async
+    index_path({name})  parse_index({text})
+    valid_name  valid_version  compare_versions
+    is_known_path_head({root}, {name}, {opts}?)
+    exec({argv}, {opts}, {cb}?)  config  std_crates
+    The crates.io client uses curl with an argument list, caches on disk
+    under `stdpath("cache")/xyno-rust/crates` and tolerates being offline.
+    `config` holds the timeouts, TTLs, URLs, user agent and cache directory.
+
+xyno_rust.deps                                                  *xyno_rust.deps*
+    snacks()                         the snacks.nvim table, or nil after one
+                                     error line
+
+Buffer variable: `vim.b.xyno_rust_stopped` is a table { [server name] = true }
+on the buffers of a server that exited; |xyno_rust.lsp_status| reads it.
+
+==============================================================================
+7. WIRING IT TO THE LANGUAGE SERVERS                           *xyno-rust-wiring*
+
+The modules do not configure rust-analyzer or bacon-ls. With rustaceanvim:
+>lua
+    vim.g.rustaceanvim = {
+      server = {
+        on_exit = function(...)
+          return require("xyno_rust.rust_restart").on_exit("rust-analyzer")(...)
+        end,
+        settings = function(root, default_settings)
+          local settings = require("rustaceanvim.config.server").load_rust_analyzer_settings(
+            root,
+            { default_settings = vim.deepcopy(default_settings) }
+          )
+          local ctx = require("xyno_rust.rust_context")
+          local cargo = ctx.ra_cargo(ctx.get(ctx.root(root and (root .. "/x"))))
+          if cargo then
+            local ra = settings["rust-analyzer"]
+            ra.cargo = vim.tbl_extend("force", ra.cargo or {}, cargo)
+          end
+          return settings
+        end,
+      },
+    }
+<
+For bacon-ls, `on_exit` is the same with "bacon_ls", and `before_init`
+rebuilds the arguments from the stored context:
+>lua
+    before_init = function(params, config)
+      local rc = require("xyno_rust.rust_context")
+      local ctx = rc.get(rc.root((config.root_dir or vim.uv.cwd()) .. "/x"))
+      local s = vim.deepcopy(bacon_ls_settings) -- your own defaults
+      s.cargo.extraArgs = rc.bacon_args(ctx)
+      params.initializationOptions = s
+      config.settings = config.settings or {}
+      config.settings.bacon_ls = s
+    end,
+<
+The statusline component, with lualine:
+>lua
+    lualine_x = { require("xyno_rust.lsp_status").component }
+<
+==============================================================================
+8. HOW IT WORKS                                                   *xyno-rust-how*
+
+The context is a small JSON file per workspace root. |:RustContext| writes
+it, sends `workspace/didChangeConfiguration` to the rust-analyzer clients that
+serve the workspace, asks rustaceanvim to reload, and restarts bacon-ls so
+both see the same features and target. The root is the one `cargo
+locate-project --workspace` reports, with a text walk to the outermost
+`[workspace]` when cargo cannot answer.
+
+|xyno_rust.lsp_status| reacts to LspProgress, `experimental/serverStatus`,
+`window/showMessage` and text changes; nothing polls while idle, except the
+timers of the "deps resolving" state (6 s grace, 120 s ceiling).
+|xyno_rust.rust_restart| restarts a server after a crash, bacon-ls after a
+save of Cargo.toml or Cargo.lock, a moved git HEAD or a manifest changed on
+disk, and stops bacon-ls clients whose workspace is gone.
+
+==============================================================================
+9. PLATFORMS                                                  *xyno-rust-platforms*
+
+Linux: tested by the specs in this repository (`nvim -l tests/run.lua`).
+Windows and macOS: not tested in this repository. See the README for what the
+CI of the original configuration showed. Linux and macOS only by design: in
+|xyno_rust.rust_restart| the shadow-workspace checks, the orphan-buffer check
+and the root lookup accept only absolute paths that start with "/", so they do
+nothing on Windows, and the SIGCONT before quit is skipped there.
+
+==============================================================================
+10. LICENSE AND ORIGIN                                          *xyno-rust-license*
+
+MIT, Copyright (c) 2026 Xynorash. Extracted from xynovim
+(https://github.com/xynorash/xynovim), my Neovim configuration for Rust.
+
+ vim:tw=78:ts=8:ft=help:norl:
