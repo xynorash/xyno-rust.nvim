@@ -276,6 +276,45 @@ describe("trust follows the content that runs code (re-ask when it changed)", fu
     H.is_nil(trust.drift(dir))
   end)
 
+  it("rehash() takes a list of saved files (cargo add touched the member and the workspace manifest)", function()
+    local dir = ws()
+    write(dir .. "/m/Cargo.toml", '[package]\nname = "m"\nversion = "0.1.0"\n')
+    trust.trust(dir)
+    write(dir .. "/Cargo.toml", '[package]\nname = "d"\nversion = "0.1.1"\nedition = "2021"\n')
+    write(dir .. "/m/Cargo.toml", '[package]\nname = "m"\nversion = "0.1.1"\n')
+    H.eq(false, trust.rehash(dir, dir .. "/Cargo.toml"), "a second changed file is not covered by one saved path")
+    H.eq(true, trust.rehash(dir, { dir .. "/Cargo.toml", dir .. "/m/Cargo.toml" }))
+    H.ok(trust.is_trusted(dir))
+  end)
+
+  it(
+    "the fingerprint is memoised on stat stamps: reused while nothing changed, redone at once on any change",
+    function()
+      local dir = ws()
+      local a = trust.fingerprint(dir)
+      H.ok(rawequal(a, trust.fingerprint(dir)), "unchanged tree: the same result, no new walk")
+      write(dir .. "/sub/build.rs", "fn main() {}\n") -- a new file in a new directory changes the parent's stamp
+      local b = trust.fingerprint(dir)
+      H.not_ok(rawequal(a, b))
+      H.ok(b.files["sub/build.rs"])
+      write(dir .. "/sub/build.rs", "fn main() { /* changed */ }\n")
+      H.not_ok(trust.fingerprint(dir).files["sub/build.rs"] == b.files["sub/build.rs"])
+      vim.uv.fs_unlink(dir .. "/sub/build.rs")
+      H.is_nil(trust.fingerprint(dir).files["sub/build.rs"])
+    end
+  )
+
+  it("the directory walk is capped (a huge tree is cut off and marked truncated, not walked for ever)", function()
+    local dir = ws()
+    for i = 1, 40 do
+      vim.fn.mkdir(dir .. "/d" .. i, "p")
+    end
+    local f = trust.fingerprint(dir, { fresh = true })
+    H.eq(nil, f.truncated)
+    local cap = trust._max_dirs
+    H.ok(cap and cap >= 1000, "the cap is exported for specs and sane")
+  end)
+
   it("the scan ignores target/ and .git/ and is bounded", function()
     local dir = ws()
     trust.trust(dir)

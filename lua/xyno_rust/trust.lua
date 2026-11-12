@@ -36,7 +36,7 @@
 --   trust.revoke(root) / trust.revoke_all()
 --   trust.list()                         -> { { root, recursive, at } ... } sorted by root
 --   trust.drift(root)                    -> nil, or the files whose content differs from what was trusted (api 1.3)
---   trust.rehash(root, saved?)           -> boolean: record the current content of root's own entry (only `saved` may differ) (api 1.3)
+--   trust.rehash(root, saved?)           -> boolean: record the current content of root's own entry (only `saved`, a path or a list of paths, may differ) (api 1.3)
 --   trust.fingerprint(root)              -> { hash, files = { [rel|abs path] = short hash }, truncated? } (api 1.3)
 --   trust.ra_overrides(root)             -> rust-analyzer settings table ({} for a trusted workspace)
 local M = {}
@@ -64,6 +64,29 @@ local SKIP_DIR = { target = true, [".git"] = true, [".hg"] = true, [".svn"] = tr
 local WATCHED =
   { ["Cargo.toml"] = true, ["build.rs"] = true, ["rust-toolchain"] = true, ["rust-toolchain.toml"] = true }
 local MAX_FILES, MAX_DEPTH, MAX_BYTES = 400, 6, 1024 * 1024
+local MAX_DIRS = 2500 -- directories scanned per fingerprint: a huge tree is cut off (`truncated`), never walked for ever
+
+M._max_dirs = MAX_DIRS
+
+local function stamp(path)
+  local st = vim.uv.fs_stat(path)
+  return st and ("%d.%d:%d"):format(st.mtime.sec, st.mtime.nsec, st.size) or "-"
+end
+
+-- fingerprint memo: path -> { fp, stamps = { [dir or file] = stamp } }. A memoised result is used while every
+-- directory it scanned and every file it read still has the stat stamp it had (an added or removed entry
+-- changes the directory's mtime), so the callers that ask often (statuslines, FocusGained, every command)
+-- stat the tree instead of scanning and hashing it, and a real change is still seen at once.
+local memo = {}
+
+local function memo_valid(m)
+  for path, st in pairs(m.stamps) do
+    if stamp(path) ~= st then
+      return false
+    end
+  end
+  return true
+end
 
 local function digest(path)
   local f = io.open(path, "rb")
@@ -77,9 +100,14 @@ end
 
 --- What cargo executes or obeys under `root`: { hash = combined, files = { [name] = first 12 hex digits } }.
 --- Names are relative to root, or absolute for files in parent directories.
-function M.fingerprint(root)
+function M.fingerprint(root, opts)
   local path = M.normalize(root)
-  local files, n, truncated = {}, 0, false
+  local cached = path and memo[path]
+  if cached and not (opts and opts.fresh) and memo_valid(cached) then
+    return cached.fp
+  end
+  local files, n, truncated, ndirs = {}, 0, false, 0
+  local stamps = {}
   local function add(name, full)
     if n >= MAX_FILES then
       truncated = true
@@ -89,9 +117,16 @@ function M.fingerprint(root)
     if d then
       n = n + 1
       files[name] = d:sub(1, 12)
+      stamps[full] = stamp(full)
     end
   end
   local function walk(dir, rel, depth)
+    if ndirs >= MAX_DIRS then
+      truncated = true
+      return
+    end
+    ndirs = ndirs + 1
+    stamps[dir] = stamp(dir)
     local handle = vim.uv.fs_scandir(dir)
     if not handle then
       return
@@ -129,6 +164,10 @@ function M.fingerprint(root)
     local guard = 0
     while dir and dir ~= "" and guard < 64 do
       guard = guard + 1
+      stamps[dir] = stamp(dir) -- a new .cargo/config or rust-toolchain here changes the directory
+      if vim.uv.fs_stat(dir .. "/.cargo") then
+        stamps[dir .. "/.cargo"] = stamp(dir .. "/.cargo")
+      end
       for _, name in ipairs({ ".cargo/config", ".cargo/config.toml", "rust-toolchain", "rust-toolchain.toml" }) do
         add(dir == "/" and ("/" .. name) or (dir .. "/" .. name), (dir == "/" and "" or dir) .. "/" .. name)
       end
@@ -145,7 +184,16 @@ function M.fingerprint(root)
   for _, name in ipairs(names) do
     parts[#parts + 1] = name .. "\0" .. files[name]
   end
-  return { hash = vim.fn.sha256(table.concat(parts, "\n")), files = files, truncated = truncated or nil }
+  local fp = { hash = vim.fn.sha256(table.concat(parts, "\n")), files = files, truncated = truncated or nil }
+  if path then
+    memo[path] = { fp = fp, stamps = stamps }
+  end
+  return fp
+end
+
+--- Forget the memoised fingerprints (specs; the stat check makes it unnecessary otherwise).
+function M._forget()
+  memo = {}
 end
 
 local function changed_files(old, new)
@@ -256,12 +304,15 @@ function M.rehash(root, saved)
   if not e or e.recursive then
     return false
   end
-  local f = M.fingerprint(path)
+  local f = M.fingerprint(path, { fresh = true })
   if saved and e.files then
-    local only = vim.fs.normalize(vim.uv.fs_realpath(saved) or saved)
+    local only = {}
+    for _, one in ipairs(type(saved) == "table" and saved or { saved }) do
+      only[vim.fs.normalize(vim.uv.fs_realpath(one) or one)] = true
+    end
     for _, name in ipairs(changed_files(e.files, f.files)) do
       local full = name:sub(1, 1) == "/" and name or (path .. "/" .. name)
-      if vim.fs.normalize(vim.uv.fs_realpath(full) or full) ~= only then
+      if not only[vim.fs.normalize(vim.uv.fs_realpath(full) or full)] then
         return false
       end
     end
@@ -280,7 +331,7 @@ end
 function M.trust(root, opts)
   local path = M.normalize(root)
   assert(path, "trust.trust: a directory is required")
-  local fp = not (opts and opts.recursive) and M.fingerprint(path) or nil
+  local fp = not (opts and opts.recursive) and M.fingerprint(path, { fresh = true }) or nil
   require("xyno_rust.statefile").update(file(), function(all)
     local recursive = (opts and opts.recursive) == true
     all[path] = { recursive = recursive, at = os.time() }
