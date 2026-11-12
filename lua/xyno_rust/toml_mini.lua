@@ -74,7 +74,7 @@ local function value(s, i, line)
       if ch == "}" then
         return t, j + 1
       end
-      local k, e = s:match('^([%w_%-]+)[ \t]*=[ \t]*()', j)
+      local k, e = s:match("^([%w_%-]+)[ \t]*=[ \t]*()", j)
       if not k then
         local qk, qe = s:match('^"([^"\n]*)"[ \t]*=[ \t]*()', j)
         if not qk then
@@ -166,7 +166,7 @@ function M.parse(text)
       cur = node
       i, line = nextline(e), line + 1
     else
-      local k, e = text:match('^([%w_%-]+)[ \t]*=[ \t]*()', ls)
+      local k, e = text:match("^([%w_%-]+)[ \t]*=[ \t]*()", ls)
       if not k then
         return perr(line, "expected `key = value` or a table header")
       end

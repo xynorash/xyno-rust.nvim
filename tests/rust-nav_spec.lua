@@ -159,10 +159,12 @@ describe("rust_nav", function()
     local l = find("fn area(&self) -> f64 {")
     vim.api.nvim_win_set_cursor(0, { l + 1, 8 })
     stub_definition({
-      res = { {
-        uri = vim.uri_from_fname(file),
-        range = { start = { line = 99, character = 0 }, ["end"] = { line = 99, character = 5 } },
-      } },
+      res = {
+        {
+          uri = vim.uri_from_fname(file),
+          range = { start = { line = 99, character = 0 }, ["end"] = { line = 99, character = 5 } },
+        },
+      },
     })
     nav.goto_super()
     H.eq(file, vim.api.nvim_buf_get_name(0))
@@ -186,10 +188,12 @@ describe("rust_nav", function()
     local l = find("fn area(&self) -> f64 {")
     vim.api.nvim_win_set_cursor(0, { l + 1, 8 })
     stub_definition({
-      res = { {
-        uri = vim.uri_from_fname(file),
-        range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 5 } },
-      } },
+      res = {
+        {
+          uri = vim.uri_from_fname(file),
+          range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 5 } },
+        },
+      },
     })
     nav.goto_super()
     H.eq(file, vim.api.nvim_buf_get_name(0))
@@ -197,38 +201,43 @@ describe("rust_nav", function()
     vim.cmd("bwipeout!")
   end)
 
-  it("the doc-comment skip does not depend on a treesitter parser (field test: std's Display::fmt, `///` line)", function()
-    local dir = H.tmpdir()
-    local file = dir .. "/nots.rs"
-    vim.fn.writefile({
-      "pub trait Shape {",
-      "    /// Formats like `fn area(&self)` does.",
-      "    // fn area is also mentioned here",
-      "    /* fn area */",
-      "    fn area(&self) -> f64;",
-      "}",
-    }, file)
-    local l = find("fn area(&self) -> f64 {")
-    vim.api.nvim_win_set_cursor(0, { l + 1, 8 })
-    -- a freshly shown buffer has no parser yet: get_node() gave nil and the first match stuck
-    local orig_get_node = vim.treesitter.get_node
-    stub(vim.treesitter, "get_node", function(...)
-      if vim.api.nvim_buf_get_name(0) == file then
-        return nil
-      end
-      return orig_get_node(...)
-    end)
-    stub_definition({
-      res = { {
-        uri = vim.uri_from_fname(file),
-        range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 5 } },
-      } },
-    })
-    nav.goto_super()
-    H.eq(file, vim.api.nvim_buf_get_name(0))
-    H.eq(5, vim.api.nvim_win_get_cursor(0)[1], "landed on a comment line, not the method")
-    vim.cmd("bwipeout!")
-  end)
+  it(
+    "the doc-comment skip does not depend on a treesitter parser (field test: std's Display::fmt, `///` line)",
+    function()
+      local dir = H.tmpdir()
+      local file = dir .. "/nots.rs"
+      vim.fn.writefile({
+        "pub trait Shape {",
+        "    /// Formats like `fn area(&self)` does.",
+        "    // fn area is also mentioned here",
+        "    /* fn area */",
+        "    fn area(&self) -> f64;",
+        "}",
+      }, file)
+      local l = find("fn area(&self) -> f64 {")
+      vim.api.nvim_win_set_cursor(0, { l + 1, 8 })
+      -- a freshly shown buffer has no parser yet: get_node() gave nil and the first match stuck
+      local orig_get_node = vim.treesitter.get_node
+      stub(vim.treesitter, "get_node", function(...)
+        if vim.api.nvim_buf_get_name(0) == file then
+          return nil
+        end
+        return orig_get_node(...)
+      end)
+      stub_definition({
+        res = {
+          {
+            uri = vim.uri_from_fname(file),
+            range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 5 } },
+          },
+        },
+      })
+      nav.goto_super()
+      H.eq(file, vim.api.nvim_buf_get_name(0))
+      H.eq(5, vim.api.nvim_win_get_cursor(0)[1], "landed on a comment line, not the method")
+      vim.cmd("bwipeout!")
+    end
+  )
 
   it("real rust-analyzer: from `impl Shape for Square` to the trait's `fn area`", function()
     local l = find("fn area(&self) -> f64 {")
@@ -316,7 +325,6 @@ describe("rust_nav", function()
   end)
 end)
 
-
 describe("grouped usages (:RustUsages)", function()
   local N = require("xyno_rust.rust_nav")
   it("usage_group tells imports, docs, tests and code apart", function()
@@ -329,14 +337,32 @@ describe("grouped usages (:RustUsages)", function()
   end)
 
   it("group_usages orders by group, file, line and summarises", function()
-    local function loc(path, line) return { uri = "file:///w/" .. path, range = { start = { line = line, character = 4 }, ["end"] = { line = line, character = 5 } } } end
+    local function loc(path, line)
+      return {
+        uri = "file:///w/" .. path,
+        range = { start = { line = line, character = 4 }, ["end"] = { line = line, character = 5 } },
+      }
+    end
     local text = {
       ["file:///w/tests/it.rs"] = { "", "Y::new();" },
       ["file:///w/src/b.rs"] = { "use crate::Y;", "", "fn f() { Y::new(); }" },
       ["file:///w/src/a.rs"] = { "/// docs for Y", "fn g() { Y::new(); }" },
     }
-    local items, summary = N.group_usages({ loc("tests/it.rs", 1), loc("src/b.rs", 2), loc("src/b.rs", 0), loc("src/a.rs", 0), loc("src/a.rs", 1) }, function(u) return text[u] end, function(p) return p:gsub("^/w/", "") end)
-    H.eq({ "code:src/a.rs:2", "code:src/b.rs:3", "import:src/b.rs:1", "tests:tests/it.rs:2", "docs:src/a.rs:1" }, vim.tbl_map(function(i) return i.group .. ":" .. i.path .. ":" .. i.lnum end, items) )
+    local items, summary = N.group_usages(
+      { loc("tests/it.rs", 1), loc("src/b.rs", 2), loc("src/b.rs", 0), loc("src/a.rs", 0), loc("src/a.rs", 1) },
+      function(u)
+        return text[u]
+      end,
+      function(p)
+        return p:gsub("^/w/", "")
+      end
+    )
+    H.eq(
+      { "code:src/a.rs:2", "code:src/b.rs:3", "import:src/b.rs:1", "tests:tests/it.rs:2", "docs:src/a.rs:1" },
+      vim.tbl_map(function(i)
+        return i.group .. ":" .. i.path .. ":" .. i.lnum
+      end, items)
+    )
     H.eq("5 usage(s) in 3 file(s): code 2, import 1, tests 1, docs 1", summary)
   end)
 end)

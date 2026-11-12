@@ -17,7 +17,10 @@ M.client_name = "rust-analyzer"
 local RETRY_CODES = { [-32801] = true, [-32802] = true }
 
 local function retryable(err)
-  return type(err) == "table" and (RETRY_CODES[err.code] or tostring(err.message or ""):lower():find("content modified", 1, true)) and true or false
+  return type(err) == "table"
+      and (RETRY_CODES[err.code] or tostring(err.message or ""):lower():find("content modified", 1, true))
+      and true
+    or false
 end
 
 --- The rust-analyzer clients of a buffer. Specs replace this to fake a server.

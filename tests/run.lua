@@ -21,19 +21,21 @@ if not vim.env.XYNO_TEST_ISOLATED then
   vim.fn.mkdir(state, "p")
   local argv = { vim.v.progpath, "-l", here .. "/run.lua" }
   vim.list_extend(argv, arg or {})
-  local r = vim.system(argv, {
-    env = { XDG_STATE_HOME = state, XYNO_TEST_ISOLATED = "1", LOCALAPPDATA = state },
-    stdout = function(_, d)
-      if d then
-        io.stdout:write(d)
-      end
-    end,
-    stderr = function(_, d)
-      if d then
-        io.stderr:write(d)
-      end
-    end,
-  }):wait(1800000)
+  local r = vim
+    .system(argv, {
+      env = { XDG_STATE_HOME = state, XYNO_TEST_ISOLATED = "1", LOCALAPPDATA = state },
+      stdout = function(_, d)
+        if d then
+          io.stdout:write(d)
+        end
+      end,
+      stderr = function(_, d)
+        if d then
+          io.stderr:write(d)
+        end
+      end,
+    })
+    :wait(1800000)
   vim.fn.delete(state, "rf")
   os.exit(r.code)
 end

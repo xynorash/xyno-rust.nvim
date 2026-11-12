@@ -55,9 +55,15 @@ end
 
 local function section_tools()
   health.start("xyno-rust: tools")
-  exe("cargo", { required = true, version = { "cargo", "--version" }, advice = { "install a Rust toolchain: https://rustup.rs" } })
+  exe(
+    "cargo",
+    { required = true, version = { "cargo", "--version" }, advice = { "install a Rust toolchain: https://rustup.rs" } }
+  )
   exe("rustup", { used_by = "the :RustContext target list", version = { "rustup", "--version" } })
-  exe("rust-analyzer", { used_by = "language server; rustaceanvim can also use its own", version = { "rust-analyzer", "--version" } })
+  exe(
+    "rust-analyzer",
+    { used_by = "language server; rustaceanvim can also use its own", version = { "rust-analyzer", "--version" } }
+  )
   exe("bacon-ls", { used_by = "clippy tier of the diagnostics" })
   for _, t in ipairs({
     { "samply", ":RustTargets samply item" },
@@ -107,10 +113,18 @@ local function section_state()
     local rej = rc.rejected(ctx)
     if #rej > 0 then
       bad = bad + 1
-      health.warn(("rust-context.json: %s holds invalid values that are ignored: %s"):format(root, table.concat(rej, ", ")), "run :RustContext reset in that workspace or edit the file")
+      health.warn(
+        ("rust-context.json: %s holds invalid values that are ignored: %s"):format(root, table.concat(rej, ", ")),
+        "run :RustContext reset in that workspace or edit the file"
+      )
     end
   end
-  health.ok(("rust-context.json: %d workspace(s) with a stored context%s"):format(n, bad > 0 and (", " .. bad .. " with invalid values") or ""))
+  health.ok(
+    ("rust-context.json: %d workspace(s) with a stored context%s"):format(
+      n,
+      bad > 0 and (", " .. bad .. " with invalid values") or ""
+    )
+  )
 end
 
 -- (the health buffer is the current one: look at the working directory)
@@ -134,7 +148,10 @@ local function section_trust()
     if trust.is_trusted(root) then
       health.ok("current workspace is trusted: " .. root)
     else
-      health.warn("current workspace is NOT trusted: " .. root .. " (running targets/tools asks first)", ":RustTrust add")
+      health.warn(
+        "current workspace is NOT trusted: " .. root .. " (running targets/tools asks first)",
+        ":RustTrust add"
+      )
     end
   end
 end
@@ -154,7 +171,10 @@ local function section_workspace()
   if meta then
     health.ok(("cargo metadata --no-deps: %d package(s), %.0f ms"):format(#meta.packages, ms))
     if ms > 2000 then
-      health.warn("cargo metadata is slow here; it runs in the background but the targets picker waits for it", "rust-toolchain.toml with a toolchain that is not installed makes cargo download it")
+      health.warn(
+        "cargo metadata is slow here; it runs in the background but the targets picker waits for it",
+        "rust-toolchain.toml with a toolchain that is not installed makes cargo download it"
+      )
     end
   else
     health.error("cargo metadata failed: " .. tostring(err))
@@ -167,7 +187,12 @@ local function section_workspace()
     end
   end
   health.info("language servers: " .. (#clients > 0 and table.concat(clients, ", ") or "none running"))
-  health.info(("background requests: %d running; statusline state for %d client(s)"):format(cargo.pending(), require("xyno_rust.lsp_status")._state_size()))
+  health.info(
+    ("background requests: %d running; statusline state for %d client(s)"):format(
+      cargo.pending(),
+      require("xyno_rust.lsp_status")._state_size()
+    )
+  )
 end
 
 function M.check()

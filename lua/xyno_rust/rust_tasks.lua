@@ -9,9 +9,18 @@ function M.samply_cmd(build, bin)
     local function q(s)
       return '"' .. s:gsub('"', '""') .. '"'
     end
-    return { "cmd", "/s", "/c", '"' .. table.concat(vim.tbl_map(q, build), " ") .. " && samply record " .. q(bin) .. '"' }
+    return {
+      "cmd",
+      "/s",
+      "/c",
+      '"' .. table.concat(vim.tbl_map(q, build), " ") .. " && samply record " .. q(bin) .. '"',
+    }
   end
-  return { "sh", "-c", table.concat(vim.tbl_map(vim.fn.shellescape, build), " ") .. " && samply record " .. vim.fn.shellescape(bin) }
+  return {
+    "sh",
+    "-c",
+    table.concat(vim.tbl_map(vim.fn.shellescape, build), " ") .. " && samply record " .. vim.fn.shellescape(bin),
+  }
 end
 
 local rc = require("xyno_rust.rust_context")
@@ -96,7 +105,9 @@ function M.target_items(root, meta)
   for _, p in ipairs(meta.packages) do
     for _, t in ipairs(p.targets) do
       local kind = t.kind[1]
-      kind = (kind == "proc-macro" or kind == "rlib" or kind == "cdylib" or kind == "staticlib" or kind == "dylib") and "lib" or kind
+      kind = (kind == "proc-macro" or kind == "rlib" or kind == "cdylib" or kind == "staticlib" or kind == "dylib")
+          and "lib"
+        or kind
       -- `--target T` puts the artefacts in target/T/<profile>/, the context's target is part of the path
       local triple = ctx and ctx.target
       if kind == "bin" and not (triple and triple:find("^wasm")) then
@@ -119,7 +130,10 @@ function M.target_items(root, meta)
         items[#items + 1] = {
           text = ("flamegraph  bin %s (%s)"):format(t.name, p.name),
           cmd = vim.list_extend(
-            vim.list_extend({ "cargo", "flamegraph", "--profile", "profiling" }, vim.list_extend(vim.deepcopy(PROFILING_FLAGS), { "-p", p.name, "--bin", t.name })),
+            vim.list_extend(
+              { "cargo", "flamegraph", "--profile", "profiling" },
+              vim.list_extend(vim.deepcopy(PROFILING_FLAGS), { "-p", p.name, "--bin", t.name })
+            ),
             flamegraph_flags(root, p)
           ),
           tool = "cargo-flamegraph",
@@ -214,15 +228,35 @@ end
 -- Workspace-wide tools (supply chain, size, build time). `flags` = builds the workspace, so the
 -- stored features / target are appended. `id` is what setup{ tools = { hide = {...} } } names.
 M.default_tools = {
-  { id = "timings", text = "timings (cargo build --timings; report in target/cargo-timings)", cmd = { "cargo", "build", "--timings" }, flags = true },
-  { id = "bloat_crates", text = "bloat by crate (release)", cmd = { "cargo", "bloat", "--release", "--crates" }, flags = true },
-  { id = "bloat_functions", text = "bloat by function (release, top 30)", cmd = { "cargo", "bloat", "--release", "-n", "30" }, flags = true },
+  {
+    id = "timings",
+    text = "timings (cargo build --timings; report in target/cargo-timings)",
+    cmd = { "cargo", "build", "--timings" },
+    flags = true,
+  },
+  {
+    id = "bloat_crates",
+    text = "bloat by crate (release)",
+    cmd = { "cargo", "bloat", "--release", "--crates" },
+    flags = true,
+  },
+  {
+    id = "bloat_functions",
+    text = "bloat by function (release, top 30)",
+    cmd = { "cargo", "bloat", "--release", "-n", "30" },
+    flags = true,
+  },
   { id = "machete", text = "unused dependencies (cargo machete)", cmd = { "cargo", "machete" } },
   { id = "deny_fetch", text = "deny: fetch advisory DB", cmd = { "cargo", "deny", "fetch" } },
   { id = "deny_check", text = "deny: check all", cmd = { "cargo", "deny", "check" } },
   { id = "audit", text = "audit (RustSec)", cmd = { "cargo", "audit" } },
   { id = "tree_dups", text = "duplicate dependency versions", cmd = { "cargo", "tree", "-d" } },
-  { id = "llvm_cov", text = "coverage report (summary in terminal)", cmd = { "cargo", "llvm-cov", "--workspace", "--ignore-run-fail", "--summary-only" }, flags = true },
+  {
+    id = "llvm_cov",
+    text = "coverage report (summary in terminal)",
+    cmd = { "cargo", "llvm-cov", "--workspace", "--ignore-run-fail", "--summary-only" },
+    flags = true,
+  },
 }
 
 local tools_cfg = { hide = {}, extra = {} }
@@ -250,7 +284,15 @@ function M.validate_tools(t)
     else
       for _, id in ipairs(t.hide) do
         if not ids[id] then
-          problems[#problems + 1] = ("tools.hide: unknown tool `%s` (known: %s)"):format(tostring(id), table.concat(vim.tbl_map(function(d) return d.id end, M.default_tools), ", "))
+          problems[#problems + 1] = ("tools.hide: unknown tool `%s` (known: %s)"):format(
+            tostring(id),
+            table.concat(
+              vim.tbl_map(function(d)
+                return d.id
+              end, M.default_tools),
+              ", "
+            )
+          )
         end
       end
     end
@@ -337,7 +379,10 @@ function M.tools()
       end
       -- no deny.toml: every dependency fails the (empty) licence allow list
       if t.id == "deny_check" and not has_deny_config(root) then
-        return { text = t.text .. " (no deny.toml: licenses skipped)", cmd = { "cargo", "deny", "check", "advisories", "bans", "sources" } }
+        return {
+          text = t.text .. " (no deny.toml: licenses skipped)",
+          cmd = { "cargo", "deny", "check", "advisories", "bans", "sources" },
+        }
       end
       return { text = t.text, cmd = cmd }
     end, M.tool_list())
@@ -401,7 +446,11 @@ function M.setup(opts)
   end
   vim.api.nvim_create_user_command("RustTargets", M.targets, { desc = "Run/test/bench a cargo target" })
   vim.api.nvim_create_user_command("RustTools", M.tools, { desc = "Cargo tools: deny, audit, bloat, timings, ..." })
-  vim.api.nvim_create_user_command("ActJob", M.act_job, { desc = "Run the GitHub Actions job under the cursor with act" })
+  vim.api.nvim_create_user_command(
+    "ActJob",
+    M.act_job,
+    { desc = "Run the GitHub Actions job under the cursor with act" }
+  )
   vim.api.nvim_create_user_command("RustNew", function(a)
     M.new(a.args)
   end, { nargs = "?", desc = "cargo new in the current directory" })

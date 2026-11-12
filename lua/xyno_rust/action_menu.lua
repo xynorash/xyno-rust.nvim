@@ -119,7 +119,11 @@ function M.edit_diff(edit, enc)
     if not ok then
       out[#out + 1] = ("(%s: the edit does not fit the file: %s)"):format(name, tostring(new))
     else
-      local d = vim.diff(table.concat(old, "\n") .. "\n", table.concat(new, "\n") .. "\n", { result_type = "unified", ctxlen = 3 })
+      local d = vim.diff(
+        table.concat(old, "\n") .. "\n",
+        table.concat(new, "\n") .. "\n",
+        { result_type = "unified", ctxlen = 3 }
+      )
       if d and d ~= "" then
         out[#out + 1] = ("--- a/%s\n+++ b/%s\n%s"):format(name, name, d:gsub("\n$", ""))
       end
@@ -177,7 +181,14 @@ end
 function M.items(list)
   local items = {}
   for i, a in ipairs(list) do
-    items[i] = { idx = i, text = title_of(a) .. " " .. (a.kind or ""), title = title_of(a), kind = a.kind or "", preferred = a.is_preferred, action = a }
+    items[i] = {
+      idx = i,
+      text = title_of(a) .. " " .. (a.kind or ""),
+      title = title_of(a),
+      kind = a.kind or "",
+      preferred = a.is_preferred,
+      action = a,
+    }
   end
   return items
 end
@@ -249,7 +260,8 @@ function M.open(opts)
     if #list == 0 then
       local busy = errs and errs[1] and errs[1].message
       return vim.notify(
-        busy and ("xyno-rust: no code actions (%s)"):format(busy) or "xyno-rust: no " .. (opts.only and "refactorings" or "code actions") .. " here",
+        busy and ("xyno-rust: no code actions (%s)"):format(busy)
+          or "xyno-rust: no " .. (opts.only and "refactorings" or "code actions") .. " here",
         vim.log.levels.INFO
       )
     end
@@ -280,7 +292,8 @@ function M.open(opts)
         end
         show("resolving ...")
         ca.resolve_async(item.action, function(r, err)
-          item.diff = r and preview_text(r, vim.lsp.get_client_by_id(r.client_id)) or ("(could not resolve: %s)"):format(tostring(err))
+          item.diff = r and preview_text(r, vim.lsp.get_client_by_id(r.client_id))
+            or ("(could not resolve: %s)"):format(tostring(err))
           if ctx.picker and not ctx.picker.closed and ctx.picker:current() == item then
             vim.schedule(function()
               if ctx.preview.win and ctx.preview.win:buf_valid() then
@@ -340,7 +353,11 @@ local function overlap(a, b)
         return true
       end
       -- two insertions at one point would be applied in an arbitrary order
-      if pos_cmp(x.range.start, x.range["end"]) == 0 and pos_cmp(x.range.start, y.range.start) == 0 and pos_cmp(y.range.start, y.range["end"]) == 0 then
+      if
+        pos_cmp(x.range.start, x.range["end"]) == 0
+        and pos_cmp(x.range.start, y.range.start) == 0
+        and pos_cmp(y.range.start, y.range["end"]) == 0
+      then
         return true
       end
     end
@@ -446,7 +463,12 @@ function M.fix_all(buf, opts, cb)
   opts = opts or {}
   local skipped = 0
   local function finish(n, err)
-    cb({ applied = n, remaining = vim.api.nvim_buf_is_valid(buf) and #vim.diagnostic.get(buf) or 0, skipped = skipped, err = err })
+    cb({
+      applied = n,
+      remaining = vim.api.nvim_buf_is_valid(buf) and #vim.diagnostic.get(buf) or 0,
+      skipped = skipped,
+      err = err,
+    })
   end
   M.wait_idle(buf, opts.wait_ms or 8000, function(idle)
     if not idle then
@@ -546,10 +568,14 @@ function M.fix_all_cmd()
     end
     local left = ("%d diagnostic%s left"):format(res.remaining, res.remaining == 1 and "" or "s")
     if res.skipped > 0 then
-      left = left .. ("; %d from cargo check skipped: they describe the saved text, save (:w) and run again"):format(res.skipped)
+      left = left
+        .. ("; %d from cargo check skipped: they describe the saved text, save (:w) and run again"):format(res.skipped)
     end
     if res.applied == 0 then
-      return vim.notify(("xyno-rust: no preferred quick fix to apply (%s; <leader>ca lists their fixes)"):format(left), vim.log.levels.INFO)
+      return vim.notify(
+        ("xyno-rust: no preferred quick fix to apply (%s; <leader>ca lists their fixes)"):format(left),
+        vim.log.levels.INFO
+      )
     end
     vim.notify(
       ("xyno-rust: applied %d quick fix%s as one undo step (%s, some may disappear once rust-analyzer re-analyses; run it again to chain)"):format(
@@ -567,8 +593,16 @@ function M.setup(opts)
     return
   end
   vim.api.nvim_create_user_command("RustActions", M.actions, { desc = "Code actions with a diff preview" })
-  vim.api.nvim_create_user_command("RustRefactor", M.refactor, { range = true, desc = "Refactorings with a diff preview" })
-  vim.api.nvim_create_user_command("RustFixAll", M.fix_all_cmd, { desc = "Apply the preferred quick fixes of this buffer" })
+  vim.api.nvim_create_user_command(
+    "RustRefactor",
+    M.refactor,
+    { range = true, desc = "Refactorings with a diff preview" }
+  )
+  vim.api.nvim_create_user_command(
+    "RustFixAll",
+    M.fix_all_cmd,
+    { desc = "Apply the preferred quick fixes of this buffer" }
+  )
 end
 
 return M

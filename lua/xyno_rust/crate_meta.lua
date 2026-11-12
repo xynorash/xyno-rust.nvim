@@ -86,9 +86,14 @@ function M.exec(argv, opts, cb)
   local function finish(r)
     return { code = r.code, stdout = r.stdout or "", stderr = r.stderr or "" }
   end
-  local ok, res = pcall(vim.system, argv, { text = true, cwd = opts.cwd, timeout = opts.timeout, env = opts.env }, cb and vim.schedule_wrap(function(r)
-    cb(finish(r))
-  end) or nil)
+  local ok, res = pcall(
+    vim.system,
+    argv,
+    { text = true, cwd = opts.cwd, timeout = opts.timeout, env = opts.env },
+    cb and vim.schedule_wrap(function(r)
+      cb(finish(r))
+    end) or nil
+  )
   if not ok then
     local r = { code = -1, stdout = "", stderr = tostring(res) }
     if cb then
@@ -308,7 +313,14 @@ local function run_metadata(root, cb)
   -- also reach a registry credential helper, is not attempted.
   local trusted = require("xyno_rust.trust").is_trusted(root)
   if not trusted then
-    opts.env = { RUSTC = "rustc", RUSTC_WRAPPER = "", RUSTC_WORKSPACE_WRAPPER = "", CARGO_BUILD_RUSTC = "rustc", CARGO_BUILD_RUSTC_WRAPPER = "", CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER = "" }
+    opts.env = {
+      RUSTC = "rustc",
+      RUSTC_WRAPPER = "",
+      RUSTC_WORKSPACE_WRAPPER = "",
+      CARGO_BUILD_RUSTC = "rustc",
+      CARGO_BUILD_RUSTC_WRAPPER = "",
+      CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER = "",
+    }
   end
   -- offline first: deterministic and fast when the registry already has the
   -- crates; the online run only happens when that cannot resolve
@@ -319,7 +331,10 @@ local function run_metadata(root, cb)
       return cb(meta)
     end
     if not trusted then
-      return cb(nil, (err or "cargo metadata failed") .. "\n(workspace not trusted: not retried online; :RustTrust add to allow it)")
+      return cb(
+        nil,
+        (err or "cargo metadata failed") .. "\n(workspace not trusted: not retried online; :RustTrust add to allow it)"
+      )
     end
     M.exec(base, opts, function(r2)
       local m2, e2 = parse(r2)
@@ -489,7 +504,9 @@ end
 --- { name = { "dep:x", "y/z", ... } }
 function M.parse_features(toml)
   local out = {}
-  local body = toml:match("\n%[features%]\n(.-)\n%[") or toml:match("\n%[features%]\n(.*)$") or toml:match("^%[features%]\n(.*)$")
+  local body = toml:match("\n%[features%]\n(.-)\n%[")
+    or toml:match("\n%[features%]\n(.*)$")
+    or toml:match("^%[features%]\n(.*)$")
   if not body then
     return out
   end
@@ -543,19 +560,32 @@ end
 --- (no network), "notfound" or "http".
 local function http_get(url, cb)
   local argv = {
-    "curl", "--silent", "--show-error",
-    "--max-time", tostring(math.max(1, math.floor(M.config.timeout_ms / 1000))),
-    "--proto", M.config.proto, "--proto-redir", M.config.proto,
-    "-A", M.config.user_agent,
-    "-H", "Accept: application/json",
-    "--write-out", "\n%{http_code}",
+    "curl",
+    "--silent",
+    "--show-error",
+    "--max-time",
+    tostring(math.max(1, math.floor(M.config.timeout_ms / 1000))),
+    "--proto",
+    M.config.proto,
+    "--proto-redir",
+    M.config.proto,
+    "-A",
+    M.config.user_agent,
+    "-H",
+    "Accept: application/json",
+    "--write-out",
+    "\n%{http_code}",
     url,
   }
   M.exec(argv, { timeout = M.config.timeout_ms + 2000 }, function(r)
     if r.code ~= 0 then
       -- 6 host, 7 connect, 28 timeout, 35 TLS, 52/56 network, -1 no curl
       local offline = ({ [6] = 1, [7] = 1, [28] = 1, [35] = 1, [52] = 1, [56] = 1, [-1] = 1 })[r.code]
-      return cb(nil, (offline and "offline: " or "request failed: ") .. vim.trim(r.stderr), offline and "offline" or "http")
+      return cb(
+        nil,
+        (offline and "offline: " or "request failed: ") .. vim.trim(r.stderr),
+        offline and "offline" or "http"
+      )
     end
     local body, status = r.stdout:match("^(.*)\n(%d+)$")
     status = tonumber(status) or 0
@@ -664,50 +694,62 @@ function M.info_async(name, cb, opts)
     end)
   end
   local lname = name:lower()
-  cached_get("index-" .. lname .. ".jsonl", M.config.index_ttl, M.config.index_url .. "/" .. M.index_path(name), opts.refresh, function(text, err, how)
-    if not text then
-      return cb(nil, err)
-    end
-    local versions = M.parse_index(text)
-    if #versions == 0 then
-      return cb(nil, "no versions in the index answer")
-    end
-    local newest
-    for _, v in ipairs(versions) do
-      if not v.yanked and (not newest or M.compare_versions(v.version, newest.version) > 0) then
-        newest = v
+  cached_get(
+    "index-" .. lname .. ".jsonl",
+    M.config.index_ttl,
+    M.config.index_url .. "/" .. M.index_path(name),
+    opts.refresh,
+    function(text, err, how)
+      if not text then
+        return cb(nil, err)
       end
-    end
-    newest = newest or versions[#versions]
-    local info = {
-      name = name,
-      versions = versions,
-      newest = newest.version,
-      features = newest.features,
-      deps = newest.deps,
-      from_cache = how.from_cache,
-      stale = how.stale,
-    }
-    if opts.index_only then
-      return cb(info)
-    end
-    -- description and downloads are only in the web API (`?include=` leaves out
-    -- the 400 KB of version rows, which time out a 5 s call); its failure does not
-    -- fail the lookup
-    cached_get("crate-" .. lname .. ".json", M.config.index_ttl, M.config.api_url .. "/crates/" .. lname .. "?include=", opts.refresh, function(api)
-      if api then
-        local ok, j = pcall(vim.json.decode, api, JSON_OPTS)
-        local c = ok and type(j) == "table" and j.crate
-        if type(c) == "table" then
-          info.description = type(c.description) == "string" and c.description or nil
-          info.downloads = tonumber(c.downloads)
-          info.recent_downloads = tonumber(c.recent_downloads)
-          info.repository = type(c.repository) == "string" and c.repository or nil
+      local versions = M.parse_index(text)
+      if #versions == 0 then
+        return cb(nil, "no versions in the index answer")
+      end
+      local newest
+      for _, v in ipairs(versions) do
+        if not v.yanked and (not newest or M.compare_versions(v.version, newest.version) > 0) then
+          newest = v
         end
       end
-      cb(info)
-    end)
-  end)
+      newest = newest or versions[#versions]
+      local info = {
+        name = name,
+        versions = versions,
+        newest = newest.version,
+        features = newest.features,
+        deps = newest.deps,
+        from_cache = how.from_cache,
+        stale = how.stale,
+      }
+      if opts.index_only then
+        return cb(info)
+      end
+      -- description and downloads are only in the web API (`?include=` leaves out
+      -- the 400 KB of version rows, which time out a 5 s call); its failure does not
+      -- fail the lookup
+      cached_get(
+        "crate-" .. lname .. ".json",
+        M.config.index_ttl,
+        M.config.api_url .. "/crates/" .. lname .. "?include=",
+        opts.refresh,
+        function(api)
+          if api then
+            local ok, j = pcall(vim.json.decode, api, JSON_OPTS)
+            local c = ok and type(j) == "table" and j.crate
+            if type(c) == "table" then
+              info.description = type(c.description) == "string" and c.description or nil
+              info.downloads = tonumber(c.downloads)
+              info.recent_downloads = tonumber(c.recent_downloads)
+              info.repository = type(c.repository) == "string" and c.repository or nil
+            end
+          end
+          cb(info)
+        end
+      )
+    end
+  )
 end
 
 function M.info(name, opts)
@@ -735,28 +777,35 @@ function M.search_async(query, cb, opts)
     end)
   end
   local url = M.config.api_url .. "/crates?q=" .. pct(query) .. "&per_page=10"
-  cached_get("search-" .. vim.fn.sha256(query):sub(1, 32) .. ".json", M.config.search_ttl, url, opts.refresh, function(text, err, how)
-    if not text then
-      return cb(nil, err)
-    end
-    local ok, j = pcall(vim.json.decode, text, JSON_OPTS)
-    if not ok or type(j) ~= "table" or type(j.crates) ~= "table" then
-      return cb(nil, "unexpected search answer")
-    end
-    local list = { from_cache = how.from_cache, stale = how.stale }
-    for _, c in ipairs(j.crates) do
-      if type(c) == "table" and M.valid_name(c.name) then
-        list[#list + 1] = {
-          name = c.name,
-          version = M.valid_version(c.max_stable_version) and c.max_stable_version or (M.valid_version(c.max_version) and c.max_version or nil),
-          description = type(c.description) == "string" and c.description or nil,
-          downloads = tonumber(c.downloads),
-          recent_downloads = tonumber(c.recent_downloads),
-        }
+  cached_get(
+    "search-" .. vim.fn.sha256(query):sub(1, 32) .. ".json",
+    M.config.search_ttl,
+    url,
+    opts.refresh,
+    function(text, err, how)
+      if not text then
+        return cb(nil, err)
       end
+      local ok, j = pcall(vim.json.decode, text, JSON_OPTS)
+      if not ok or type(j) ~= "table" or type(j.crates) ~= "table" then
+        return cb(nil, "unexpected search answer")
+      end
+      local list = { from_cache = how.from_cache, stale = how.stale }
+      for _, c in ipairs(j.crates) do
+        if type(c) == "table" and M.valid_name(c.name) then
+          list[#list + 1] = {
+            name = c.name,
+            version = M.valid_version(c.max_stable_version) and c.max_stable_version
+              or (M.valid_version(c.max_version) and c.max_version or nil),
+            description = type(c.description) == "string" and c.description or nil,
+            downloads = tonumber(c.downloads),
+            recent_downloads = tonumber(c.recent_downloads),
+          }
+        end
+      end
+      cb(list)
     end
-    cb(list)
-  end)
+  )
 end
 
 function M.search(query, opts)

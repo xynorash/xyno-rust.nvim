@@ -16,7 +16,10 @@ end
 describe("names", function()
   it("drops the offset and the legacy hash, keeps generics", function()
     H.eq("hot::spin", P.clean("hot::spin::h1a2b3c4d5e6f7081+0x14"))
-    H.eq("<alloc::vec::Vec<T> as core::ops::drop::Drop>::drop", P.clean("<alloc::vec::Vec<T> as core::ops::drop::Drop>::drop+0x1c"))
+    H.eq(
+      "<alloc::vec::Vec<T> as core::ops::drop::Drop>::drop",
+      P.clean("<alloc::vec::Vec<T> as core::ops::drop::Drop>::drop+0x1c")
+    )
     H.eq("[unknown]", P.clean("  "))
   end)
   it("symbol_of finds the identifier to look up", function()
@@ -75,7 +78,11 @@ describe("formats", function()
   end)
 
   it("a perf script without header lines or with ragged blocks still parses", function()
-    local p = assert(P.parse("x 1 1.0:  1 cpu-clock:u:\n\t  10 f+0x1 (/a)\n\t  20 g+0x2 (/a)\n\n\n\nx 1 1.1: 1 cpu-clock:u:\n\t  10 f+0x1 (/a)\n"))
+    local p = assert(
+      P.parse(
+        "x 1 1.0:  1 cpu-clock:u:\n\t  10 f+0x1 (/a)\n\t  20 g+0x2 (/a)\n\n\n\nx 1 1.1: 1 cpu-clock:u:\n\t  10 f+0x1 (/a)\n"
+      )
+    )
     H.eq(2, p.samples)
     H.eq(2, p.funcs["f"].total)
     H.eq(2, p.funcs["f"].self)
@@ -113,7 +120,9 @@ describe("view", function()
       profile = p
       H.is_nil(err)
     end)
-    H.wait_for(function() return profile end, 5000, "profile loaded")
+    H.wait_for(function()
+      return profile
+    end, 5000, "profile loaded")
     return profile
   end
 
@@ -129,7 +138,9 @@ describe("view", function()
     local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
     local at
     for i, l in ipairs(lines) do
-      if l:find("▸", 1, true) and l:find("_start", 1, true) then at = i end
+      if l:find("▸", 1, true) and l:find("_start", 1, true) then
+        at = i
+      end
     end
     H.ok(at, "collapsed root _start:\n" .. table.concat(lines, "\n"))
     vim.api.nvim_win_set_cursor(0, { at, 0 })
@@ -146,15 +157,29 @@ describe("view", function()
     local asked
     P.workspace_symbols = function(q, cb)
       asked = q
-      cb({ { name = "spin", containerName = "hot", location = { uri = vim.uri_from_fname(dir .. "/lib.rs"), range = { start = { line = 1, character = 7 }, ["end"] = { line = 1, character = 11 } } } } })
+      cb({
+        {
+          name = "spin",
+          containerName = "hot",
+          location = {
+            uri = vim.uri_from_fname(dir .. "/lib.rs"),
+            range = { start = { line = 1, character = 7 }, ["end"] = { line = 1, character = 11 } },
+          },
+        },
+      })
     end
     local buf = P.show(show("sample.folded"), "sample.folded")
     local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
     for i, l in ipairs(lines) do
-      if l:find("hot::spin", 1, true) then vim.api.nvim_win_set_cursor(0, { i, 0 }) break end
+      if l:find("hot::spin", 1, true) then
+        vim.api.nvim_win_set_cursor(0, { i, 0 })
+        break
+      end
     end
     vim.api.nvim_feedkeys("o", "x", false)
-    H.wait_for(function() return vim.api.nvim_buf_get_name(0):find("lib.rs", 1, true) end, 5000, "file opened")
+    H.wait_for(function()
+      return vim.api.nvim_buf_get_name(0):find("lib.rs", 1, true)
+    end, 5000, "file opened")
     H.eq("spin", asked)
     H.eq({ 2, 7 }, vim.api.nvim_win_get_cursor(0))
     P.workspace_symbols = orig
@@ -164,8 +189,12 @@ describe("view", function()
     local f = H.tmpdir() .. "/x.json"
     vim.fn.writefile({ '{"meta":{"version":24},"threads":[]}' }, f)
     local err
-    P.open_file(f, function(_, e) err = e end)
-    H.wait_for(function() return err end, 2000, "error")
+    P.open_file(f, function(_, e)
+      err = e
+    end)
+    H.wait_for(function()
+      return err
+    end, 2000, "error")
     H.match(err, "samply load", true)
   end)
 
@@ -176,7 +205,9 @@ describe("view", function()
     vim.uv.fs_utime(d .. "/old.folded", 1000, 1000)
     vim.fn.writefile({ "a 1" }, d .. "/target/xyno-profile/perf.script")
     vim.fn.writefile({ "x" }, d .. "/notes.txt")
-    local got = vim.tbl_map(function(f) return vim.fn.fnamemodify(f.path, ":t") end, P.find(d))
+    local got = vim.tbl_map(function(f)
+      return vim.fn.fnamemodify(f.path, ":t")
+    end, P.find(d))
     H.eq({ "perf.script", "old.folded" }, got)
   end)
 
@@ -200,8 +231,12 @@ describe("view", function()
       cb(true)
     end
     local profile
-    P.open_file(data, function(p) profile = p end)
-    H.wait_for(function() return profile end, 5000, "converted")
+    P.open_file(data, function(p)
+      profile = p
+    end)
+    H.wait_for(function()
+      return profile
+    end, 5000, "converted")
     trust.require = orig
     vim.env.PATH = old_path
     H.match(asked, "perf script", true)

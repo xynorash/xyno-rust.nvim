@@ -214,7 +214,15 @@ local function orphan_rust_buffer()
   end
   for _, b in ipairs(vim.api.nvim_list_bufs()) do
     local name = vim.api.nvim_buf_get_name(b)
-    if vim.api.nvim_buf_is_loaded(b) and vim.bo[b].filetype == "rust" and vim.bo[b].buftype == "" and name:sub(1, 1) == "/" and not name:find("/%.cargo/registry/") and not name:find("/%.cargo/git/") and not name:find("/%.rustup/") then
+    if
+      vim.api.nvim_buf_is_loaded(b)
+      and vim.bo[b].filetype == "rust"
+      and vim.bo[b].buftype == ""
+      and name:sub(1, 1) == "/"
+      and not name:find("/%.cargo/registry/")
+      and not name:find("/%.cargo/git/")
+      and not name:find("/%.rustup/")
+    then
       local root = rc.root(name, { nowait = true }) -- (every focus event: never wait for cargo here)
       if root and root:sub(1, 1) == "/" and vim.uv.fs_stat(root .. "/Cargo.toml") then
         return true

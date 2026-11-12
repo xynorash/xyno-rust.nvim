@@ -61,7 +61,8 @@ function M.exec(argv, opts, cb)
     end
     cb({ code = r.code, stdout = r.stdout or "", stderr = r.stderr or "", signal = r.signal })
   end
-  local ok, res = pcall(vim.system, argv, { text = true, cwd = opts.cwd, timeout = opts.timeout }, vim.schedule_wrap(finish))
+  local ok, res =
+    pcall(vim.system, argv, { text = true, cwd = opts.cwd, timeout = opts.timeout }, vim.schedule_wrap(finish))
   if not ok then
     vim.schedule(function()
       finish({ code = -1, stderr = tostring(res) })
@@ -73,12 +74,16 @@ function M.exec(argv, opts, cb)
     -- vim.system's own timeout sends SIGTERM and then waits for the pipes to close: a rustup proxy that
     -- left the real cargo running (holding the pipes) would keep the callback away for ever.
     timer = vim.uv.new_timer()
-    timer:start(opts.timeout + 1000, 0, vim.schedule_wrap(function()
-      if obj and obj.kill then
-        pcall(obj.kill, obj, 9)
-      end
-      finish({ code = 124, stderr = "timed out" })
-    end))
+    timer:start(
+      opts.timeout + 1000,
+      0,
+      vim.schedule_wrap(function()
+        if obj and obj.kill then
+          pcall(obj.kill, obj, 9)
+        end
+        finish({ code = 124, stderr = "timed out" })
+      end)
+    )
   end
   return obj
 end
@@ -147,17 +152,21 @@ function M.metadata_async(root, cb, opts)
     end)
   end
   join("metadata\0" .. root, cb, function(done)
-    M.exec({ "cargo", "metadata", "--format-version", "1", "--no-deps" }, { cwd = root, timeout = M.config.metadata_timeout_ms }, function(r)
-      if r.code ~= 0 then
-        return done(nil, failure(r, "cargo metadata"))
+    M.exec(
+      { "cargo", "metadata", "--format-version", "1", "--no-deps" },
+      { cwd = root, timeout = M.config.metadata_timeout_ms },
+      function(r)
+        if r.code ~= 0 then
+          return done(nil, failure(r, "cargo metadata"))
+        end
+        local ok, meta = pcall(vim.json.decode, r.stdout)
+        if not ok or type(meta) ~= "table" then
+          return done(nil, "cargo metadata printed no JSON")
+        end
+        meta_cache[root] = { stamp = meta_stamp(root, meta), meta = meta }
+        done(meta)
       end
-      local ok, meta = pcall(vim.json.decode, r.stdout)
-      if not ok or type(meta) ~= "table" then
-        return done(nil, "cargo metadata printed no JSON")
-      end
-      meta_cache[root] = { stamp = meta_stamp(root, meta), meta = meta }
-      done(meta)
-    end)
+    )
   end)
 end
 
@@ -225,19 +234,24 @@ function M.locate_async(dir, stamp, cb)
     end)
   end
   join("locate\0" .. dir .. "\0" .. stamp, cb, function(done)
-    M.exec({ "cargo", "locate-project", "--workspace", "--message-format", "plain" }, { cwd = dir, timeout = M.config.locate_timeout_ms }, function(r)
-      local manifest = r.code == 0 and vim.trim(r.stdout) or ""
-      local root = manifest:match("Cargo%.toml$") and vim.fs.dirname(manifest) or false
-      local definitive = root or (r.code == 101 or r.code == 1) and (r.stderr or ""):find("could not find `Cargo.toml`", 1, true)
-      if definitive then
-        located[dir] = { stamp = stamp, root = root, at = now_ms() }
-        located_failed[dir] = nil
-      else
-        located[dir] = nil
-        located_failed[dir] = { stamp = stamp, at = now_ms() }
+    M.exec(
+      { "cargo", "locate-project", "--workspace", "--message-format", "plain" },
+      { cwd = dir, timeout = M.config.locate_timeout_ms },
+      function(r)
+        local manifest = r.code == 0 and vim.trim(r.stdout) or ""
+        local root = manifest:match("Cargo%.toml$") and vim.fs.dirname(manifest) or false
+        local definitive = root
+          or (r.code == 101 or r.code == 1) and (r.stderr or ""):find("could not find `Cargo.toml`", 1, true)
+        if definitive then
+          located[dir] = { stamp = stamp, root = root, at = now_ms() }
+          located_failed[dir] = nil
+        else
+          located[dir] = nil
+          located_failed[dir] = { stamp = stamp, at = now_ms() }
+        end
+        done(root or nil)
       end
-      done(root or nil)
-    end)
+    )
   end)
 end
 

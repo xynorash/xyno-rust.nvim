@@ -225,7 +225,13 @@ describe("rust_context", function()
       H.ok(pcall(rc.describe, ctx))
       H.ok(pcall(rc.ra_cargo, ctx))
       H.ok(pcall(rc.bacon_args, ctx))
-      write_text(state_file, vim.json.encode({ [basic] = { all = false, features = { "a", 3, "", "b" }, target = "wasm32-unknown-unknown" }, other = 7 }))
+      write_text(
+        state_file,
+        vim.json.encode({
+          [basic] = { all = false, features = { "a", 3, "", "b" }, target = "wasm32-unknown-unknown" },
+          other = 7,
+        })
+      )
       H.eq({ all = false, features = { "a", "b" }, target = "wasm32-unknown-unknown" }, rc.get(basic))
       H.is_nil(rc.get("other"))
       write_text(state_file, "[1,2")
@@ -250,7 +256,10 @@ describe("rust_context", function()
       write_text(ws .. "/Cargo.toml", '[workspace]\nmembers = ["a"]\nexclude = ["ex", "nested"]\n')
       write_text(ws .. "/a/Cargo.toml", '[package]\nname = "a"\nversion = "0.1.0"\nedition = "2021"\n')
       write_text(ws .. "/ex/Cargo.toml", '[package]\nname = "ex"\nversion = "0.1.0"\nedition = "2021"\n')
-      write_text(ws .. "/nested/Cargo.toml", '[package]\nname = "nested"\nversion = "0.1.0"\nedition = "2021"\n[workspace]\n')
+      write_text(
+        ws .. "/nested/Cargo.toml",
+        '[package]\nname = "nested"\nversion = "0.1.0"\nedition = "2021"\n[workspace]\n'
+      )
       for _, d in ipairs({ "a", "ex", "nested" }) do
         write_text(ws .. "/" .. d .. "/src/lib.rs", "")
       end
@@ -284,12 +293,14 @@ describe("rust_context", function()
   -- ----------------------------------------------------------------- state
 
   describe("state file", function()
-    it("concurrent nvims applying different roots lose none (8 x 15 applies; was 79 of 160 without the lock)", function()
-      local state = H.tmpdir()
-      local script = H.tmpdir() .. "/many.lua"
-      write_text(
-        script,
-        ([[
+    it(
+      "concurrent nvims applying different roots lose none (8 x 15 applies; was 79 of 160 without the lock)",
+      function()
+        local state = H.tmpdir()
+        local script = H.tmpdir() .. "/many.lua"
+        write_text(
+          script,
+          ([[
 package.path = %q .. "/lua/?.lua;" .. package.path
 local rc = require("xyno_rust.rust_context")
 local id = tonumber(arg[1])
@@ -297,31 +308,32 @@ for i = 1, 15 do
   rc.apply(("/proj/%%d/%%d"):format(id, i), { all = false, features = { "f" .. i }, no_default = false })
 end
 ]]):format(H.repo)
-      )
-      local jobs = {}
-      for id = 1, 8 do
-        jobs[id] = vim.system({ vim.fn.exepath("nvim"), "--headless", "-u", "NONE", "-l", script, tostring(id) }, {
-          env = {
-            XDG_STATE_HOME = state,
-            XDG_CONFIG_HOME = state,
-            XDG_DATA_HOME = state,
-            XDG_CACHE_HOME = state,
-            LOCALAPPDATA = state, -- Windows: stdpath("state") is $LOCALAPPDATA/nvim-data
-          },
-          text = true,
-        })
+        )
+        local jobs = {}
+        for id = 1, 8 do
+          jobs[id] = vim.system({ vim.fn.exepath("nvim"), "--headless", "-u", "NONE", "-l", script, tostring(id) }, {
+            env = {
+              XDG_STATE_HOME = state,
+              XDG_CONFIG_HOME = state,
+              XDG_DATA_HOME = state,
+              XDG_CACHE_HOME = state,
+              LOCALAPPDATA = state, -- Windows: stdpath("state") is $LOCALAPPDATA/nvim-data
+            },
+            text = true,
+          })
+        end
+        for id, j in ipairs(jobs) do
+          local r = j:wait(60000)
+          H.eq(0, r.code, "worker " .. id .. ": " .. tostring(r.stderr))
+        end
+        local dir = state .. (vim.fn.has("win32") == 1 and "/nvim-data" or "/nvim")
+        local f = assert(io.open(dir .. "/rust-context.json"))
+        local all = vim.json.decode(f:read("*a"))
+        f:close()
+        H.eq(120, vim.tbl_count(all), "every worker's keys are in the file")
+        H.eq(0, vim.fn.filereadable(dir .. "/rust-context.json.lock"), "lock released")
       end
-      for id, j in ipairs(jobs) do
-        local r = j:wait(60000)
-        H.eq(0, r.code, "worker " .. id .. ": " .. tostring(r.stderr))
-      end
-      local dir = state .. (vim.fn.has("win32") == 1 and "/nvim-data" or "/nvim")
-      local f = assert(io.open(dir .. "/rust-context.json"))
-      local all = vim.json.decode(f:read("*a"))
-      f:close()
-      H.eq(120, vim.tbl_count(all), "every worker's keys are in the file")
-      H.eq(0, vim.fn.filereadable(dir .. "/rust-context.json.lock"), "lock released")
-    end)
+    )
 
     it("holds { [root] = ctx } under stdpath('state')", function()
       H.eq(vim.fn.stdpath("state") .. "/rust-context.json", state_file)
@@ -740,8 +752,10 @@ end
 
     it("does not prefix features of a single-package crate and sorts them", function()
       need_cargo()
-      local dir = crate('[package]\nname = "solo"\nversion = "0.1.0"\nedition = "2021"\n'
-        .. "[features]\ndefault = []\nzeta = []\nalpha = []\nmid = [\"alpha\"]\n")
+      local dir = crate(
+        '[package]\nname = "solo"\nversion = "0.1.0"\nedition = "2021"\n'
+          .. '[features]\ndefault = []\nzeta = []\nalpha = []\nmid = ["alpha"]\n'
+      )
       buf_named(dir .. "/src/lib.rs")
       local picker = stub_picker()
       rc.pick()
@@ -749,7 +763,14 @@ end
       local texts = vim.tbl_map(function(i)
         return i.text
       end, picker.opts.items)
-      H.eq({ "* all features", "* default features only (clears the list)", "* no-default-features", "alpha", "mid", "zeta" }, texts)
+      H.eq({
+        "* all features",
+        "* default features only (clears the list)",
+        "* no-default-features",
+        "alpha",
+        "mid",
+        "zeta",
+      }, texts)
     end)
 
     it("shows the stored context in the title", function()
@@ -908,7 +929,12 @@ describe("rust_context with live servers", function()
       cmd = { "rust-analyzer" },
       root_dir = basic,
       settings = { ["rust-analyzer"] = { cargo = {} } },
-    }, { bufnr = sbuf, reuse_client = function() return false end })
+    }, {
+      bufnr = sbuf,
+      reuse_client = function()
+        return false
+      end,
+    })
     local other = H.ok(vim.lsp.get_client_by_id(other_id), "second rust-analyzer client")
     H.ok(other.id ~= s.ra.id)
     s.ra.settings["rust-analyzer"].cargo.target = "stale-target" -- must be cleared by a nil target
@@ -958,7 +984,7 @@ describe("rust_context with live servers", function()
     H.known_issue({ "windows" }, "live rust-analyzer flows fail or hang on Windows in the xynovim CI; not diagnosed")
     local s = live()
     H.wait_for(function()
-      return conflict(s.buf, "rust-analyzer") 
+      return conflict(s.buf, "rust-analyzer")
     end, 90000, "the compile_error before the change")
     notes()
 
@@ -983,7 +1009,10 @@ describe("rust_context with live servers", function()
     local fake = {
       name = "rust-analyzer",
       config = { root_dir = first },
-      workspace_folders = { { name = first, uri = vim.uri_from_fname(first) }, { name = second, uri = vim.uri_from_fname(second) } },
+      workspace_folders = {
+        { name = first, uri = vim.uri_from_fname(first) },
+        { name = second, uri = vim.uri_from_fname(second) },
+      },
       settings = { ["rust-analyzer"] = { cargo = { allFeatures = true } } },
       notify = function(_, method)
         sent[#sent + 1] = method

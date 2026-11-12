@@ -232,28 +232,31 @@ describe(":RustTargets items", function()
     return H.ok(cap.opts, "picker was not opened"), dir
   end
 
-  it("builds run/test/build + samply + flamegraph for a bin, run/build for an example, test, bench, and the lib trio", function()
-    local opts = targets_for_all(nil)
-    local t = vim.tbl_map(function(i)
-      return i.text
-    end, opts.items)
-    table.sort(t)
-    H.eq({
-      "bench  bench bn (rtt_all)",
-      "build  bin tool (rtt_all)",
-      "build  example ex (rtt_all)",
-      "build  lib rtt_all (rtt_all)",
-      "doc-test  lib rtt_all (rtt_all)",
-      "flamegraph  bin tool (rtt_all)",
-      "run  bin tool (rtt_all)",
-      "run  example ex (rtt_all)",
-      "samply  bin tool (rtt_all)",
-      "test  bin tool (rtt_all)",
-      "test  lib rtt_all (rtt_all)",
-      "test  test it (rtt_all)",
-    }, t)
-    H.eq("text", opts.format)
-  end)
+  it(
+    "builds run/test/build + samply + flamegraph for a bin, run/build for an example, test, bench, and the lib trio",
+    function()
+      local opts = targets_for_all(nil)
+      local t = vim.tbl_map(function(i)
+        return i.text
+      end, opts.items)
+      table.sort(t)
+      H.eq({
+        "bench  bench bn (rtt_all)",
+        "build  bin tool (rtt_all)",
+        "build  example ex (rtt_all)",
+        "build  lib rtt_all (rtt_all)",
+        "doc-test  lib rtt_all (rtt_all)",
+        "flamegraph  bin tool (rtt_all)",
+        "run  bin tool (rtt_all)",
+        "run  example ex (rtt_all)",
+        "samply  bin tool (rtt_all)",
+        "test  bin tool (rtt_all)",
+        "test  lib rtt_all (rtt_all)",
+        "test  test it (rtt_all)",
+      }, t)
+      H.eq("text", opts.format)
+    end
+  )
 
   it("treats proc-macro, rlib, cdylib, staticlib and dylib targets as libs", function()
     local kinds = { "proc-macro", "rlib", "cdylib", "staticlib", "dylib" }
@@ -264,7 +267,10 @@ describe(":RustTargets items", function()
     local dir = H.fixture("rust-tasks-tools-all")
     vim.cmd.cd(vim.fn.fnameescape(dir))
     H.open(dir .. "/src/main.rs")
-    fake_metadata({ target_directory = dir .. "/target", packages = { { name = "p", features = {}, targets = targets } } })
+    fake_metadata({
+      target_directory = dir .. "/target",
+      packages = { { name = "p", features = {}, targets = targets } },
+    })
     with_ctx(nil)
     local cap = capture_picker()
     vim.cmd("RustTargets")
@@ -294,7 +300,10 @@ describe(":RustTargets items", function()
     local ctx = { all = false, no_default = true, features = { "b" }, target = "x86_64-unknown-linux-gnu" }
     local opts = targets_for_all(ctx)
     local function with(cmd)
-      return vim.list_extend(cmd, { "--no-default-features", "--features", "b", "--target", "x86_64-unknown-linux-gnu" })
+      return vim.list_extend(
+        cmd,
+        { "--no-default-features", "--features", "b", "--target", "x86_64-unknown-linux-gnu" }
+      )
     end
     H.eq(with({ "cargo", "run", "-p", "rtt_all", "--bin", "tool" }), item(opts, "run  bin").cmd)
     H.eq(with({ "cargo", "test", "-p", "rtt_all", "--lib" }), item(opts, "test  lib").cmd)
@@ -306,9 +315,12 @@ describe(":RustTargets items", function()
     H.need_posix("the samply item is `sh -c` on POSIX and a cmd.exe line on Windows")
     local opts, dir = targets_for_all(nil)
     local meta = vim.json.decode(
-      vim.system({ "cargo", "metadata", "--format-version", "1", "--no-deps" }, { cwd = dir, text = true }):wait().stdout
+      vim
+        .system({ "cargo", "metadata", "--format-version", "1", "--no-deps" }, { cwd = dir, text = true })
+        :wait().stdout
     )
-    local build = vim.list_extend({ "cargo", "build", "--profile", "profiling" }, require("xyno_rust.run_configs").PROFILING_FLAGS)
+    local build =
+      vim.list_extend({ "cargo", "build", "--profile", "profiling" }, require("xyno_rust.run_configs").PROFILING_FLAGS)
     vim.list_extend(build, { "-p", "rtt_all", "--bin", "tool", "--all-features" })
     local expected = table.concat(vim.tbl_map(vim.fn.shellescape, build), " ")
       .. " && samply record "
@@ -339,10 +351,7 @@ describe(":RustTargets items", function()
 
   it("the flamegraph item replaces --all-features by --features <non-default features, sorted>", function()
     local opts = targets_for_all(nil)
-    H.eq(
-      flame({ "-p", "rtt_all", "--bin", "tool", "--features", "a,b" }),
-      item(opts, "flamegraph").cmd
-    )
+    H.eq(flame({ "-p", "rtt_all", "--bin", "tool", "--features", "a,b" }), item(opts, "flamegraph").cmd)
   end)
 
   it("the flamegraph item keeps the target flag and leaves a feature-list context alone", function()
@@ -353,10 +362,7 @@ describe(":RustTargets items", function()
     )
     unstub_all()
     local opts2 = targets_for_all({ all = false, features = { "b" } })
-    H.eq(
-      flame({ "-p", "rtt_all", "--bin", "tool", "--features", "b" }),
-      item(opts2, "flamegraph").cmd
-    )
+    H.eq(flame({ "-p", "rtt_all", "--bin", "tool", "--features", "b" }), item(opts2, "flamegraph").cmd)
   end)
 
   it("the flamegraph item adds no --features for a package without features", function()
@@ -610,15 +616,31 @@ describe(":RustTools", function()
     local opts, dir = tools(ctx)
     H.eq("Cargo tools", opts.title)
     H.eq("text", opts.format)
-    local cov = { "cargo", "llvm-cov", "--workspace", "--ignore-run-fail", "--summary-only", "--features", "a", "--target", "x86_64-unknown-linux-gnu" }
+    local cov = {
+      "cargo",
+      "llvm-cov",
+      "--workspace",
+      "--ignore-run-fail",
+      "--summary-only",
+      "--features",
+      "a",
+      "--target",
+      "x86_64-unknown-linux-gnu",
+    }
     local flags = { "--features", "a", "--target", "x86_64-unknown-linux-gnu" }
     local expected = {
-      { "timings (cargo build --timings; report in target/cargo-timings)", vim.list_extend({ "cargo", "build", "--timings" }, flags) },
+      {
+        "timings (cargo build --timings; report in target/cargo-timings)",
+        vim.list_extend({ "cargo", "build", "--timings" }, flags),
+      },
       { "bloat by crate (release)", vim.list_extend({ "cargo", "bloat", "--release", "--crates" }, flags) },
       { "bloat by function (release, top 30)", vim.list_extend({ "cargo", "bloat", "--release", "-n", "30" }, flags) },
       { "unused dependencies (cargo machete)", { "cargo", "machete" } },
       { "deny: fetch advisory DB", { "cargo", "deny", "fetch" } },
-      { "deny: check all (no deny.toml: licenses skipped)", { "cargo", "deny", "check", "advisories", "bans", "sources" } },
+      {
+        "deny: check all (no deny.toml: licenses skipped)",
+        { "cargo", "deny", "check", "advisories", "bans", "sources" },
+      },
       { "audit (RustSec)", { "cargo", "audit" } },
       { "duplicate dependency versions", { "cargo", "tree", "-d" } },
       { "coverage report (summary in terminal)", cov },
@@ -655,11 +677,17 @@ describe(":RustTools", function()
   it("the default context puts --all-features on the coverage entry, repeated calls do not accumulate flags", function()
     H.need_rust()
     local opts = tools(nil)
-    H.eq({ "cargo", "llvm-cov", "--workspace", "--ignore-run-fail", "--summary-only", "--all-features" }, opts.items[9].cmd)
+    H.eq(
+      { "cargo", "llvm-cov", "--workspace", "--ignore-run-fail", "--summary-only", "--all-features" },
+      opts.items[9].cmd
+    )
     H.eq({ "cargo", "build", "--timings", "--all-features" }, opts.items[1].cmd)
     unstub_all()
     local opts2 = tools(nil)
-    H.eq({ "cargo", "llvm-cov", "--workspace", "--ignore-run-fail", "--summary-only", "--all-features" }, opts2.items[9].cmd)
+    H.eq(
+      { "cargo", "llvm-cov", "--workspace", "--ignore-run-fail", "--summary-only", "--all-features" },
+      opts2.items[9].cmd
+    )
   end)
 
   it("warns outside a crate", function()

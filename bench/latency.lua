@@ -17,7 +17,8 @@ local here = vim.fs.dirname(vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(
 
 -- ---------------------------------------------------------------- child (inside the measured nvim)
 if vim.env.XYNO_BENCH_CHILD then
-  local op, plugin, ws, out = vim.env.XYNO_BENCH_OP, vim.env.XYNO_BENCH_PLUGIN, vim.env.XYNO_BENCH_WS, vim.env.XYNO_BENCH_OUT
+  local op, plugin, ws, out =
+    vim.env.XYNO_BENCH_OP, vim.env.XYNO_BENCH_PLUGIN, vim.env.XYNO_BENCH_WS, vim.env.XYNO_BENCH_OUT
   vim.opt.rtp:prepend(plugin)
   package.path = plugin .. "/lua/?.lua;" .. plugin .. "/lua/?/init.lua;" .. package.path
   local picked
@@ -70,20 +71,29 @@ if vim.env.XYNO_BENCH_CHILD then
           end
         end
         local f = assert(io.open(out, "w"))
-        f:write(vim.json.encode({ total = (t1 - t0) / 1e6, input = worst, result = type(result) == "string" and 1 or result, keys = #keys }))
+        f:write(vim.json.encode({
+          total = (t1 - t0) / 1e6,
+          input = worst,
+          result = type(result) == "string" and 1 or result,
+          keys = #keys,
+        }))
         f:close()
         vim.cmd("qa!")
       end, 60)
     end
     local function poll(ready)
       local timer = vim.uv.new_timer()
-      timer:start(1, 1, vim.schedule_wrap(function()
-        if ready() then
-          timer:stop()
-          timer:close()
-          finish()
-        end
-      end))
+      timer:start(
+        1,
+        1,
+        vim.schedule_wrap(function()
+          if ready() then
+            timer:stop()
+            timer:close()
+            finish()
+          end
+        end)
+      )
     end
     if op == "root" then
       result = rc.root(file)
@@ -126,7 +136,7 @@ if delay then
   vim.fn.mkdir(dir, "p")
   local real = vim.fn.exepath("cargo")
   local f = assert(io.open(dir .. "/cargo", "w"))
-  f:write(("#!/bin/sh\nsleep %s\nexec %s \"$@\"\n"):format(delay, real))
+  f:write(('#!/bin/sh\nsleep %s\nexec %s "$@"\n'):format(delay, real))
   f:close()
   vim.uv.fs_chmod(dir .. "/cargo", 493)
   env.PATH = dir .. ":" .. vim.env.PATH
@@ -184,7 +194,18 @@ local function measure(op)
     XYNO_BENCH_OUT = out,
   })
   local done = false
-  local child = vim.system({ vim.v.progpath, "--headless", "-u", "NONE", "-i", "NONE", "--listen", sock, "-c", "luafile " .. here .. "/latency.lua" }, { env = e, text = true }, function()
+  local child = vim.system({
+    vim.v.progpath,
+    "--headless",
+    "-u",
+    "NONE",
+    "-i",
+    "NONE",
+    "--listen",
+    sock,
+    "-c",
+    "luafile " .. here .. "/latency.lua",
+  }, { env = e, text = true }, function()
     done = true
   end)
   feed(sock, function()
@@ -219,7 +240,16 @@ for _, op in ipairs(ops) do
     end
   end
   if #totals > 0 then
-    io.stdout:write(("%-11s total %8.1f ms   input stall %8.1f ms   (median of %d, items=%s, %d keys seen)\n"):format(op, median(totals), median(inputs), #totals, tostring(res), nkeys))
+    io.stdout:write(
+      ("%-11s total %8.1f ms   input stall %8.1f ms   (median of %d, items=%s, %d keys seen)\n"):format(
+        op,
+        median(totals),
+        median(inputs),
+        #totals,
+        tostring(res),
+        nkeys
+      )
+    )
   end
 end
 vim.cmd("qa!")

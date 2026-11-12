@@ -72,7 +72,11 @@ function M.under_mouse(pos)
   local text = vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or ""
   local first
   for _, e in ipairs(entries) do
-    if e.lens.range.start.line == row and e.lens.command and (not first or e.lens.range.start.character < first.lens.range.start.character) then
+    if
+      e.lens.range.start.line == row
+      and e.lens.command
+      and (not first or e.lens.range.start.character < first.lens.range.start.character)
+    then
       first = e
     end
   end
@@ -117,7 +121,12 @@ function M.setup(opts)
     callback = function(ev)
       vim.keymap.set("n", "<LeftMouse>", function()
         return require("xyno_rust.lens_click").click()
-      end, { buffer = ev.buf, expr = true, replace_keycodes = true, desc = "Click a code lens (Run / Debug); otherwise a normal click" })
+      end, {
+        buffer = ev.buf,
+        expr = true,
+        replace_keycodes = true,
+        desc = "Click a code lens (Run / Debug); otherwise a normal click",
+      })
     end,
   })
 end

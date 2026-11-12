@@ -58,11 +58,11 @@ function M.normalize(root)
   return real ~= "" and real or "/"
 end
 
-
 -- ------------------------------------------------------------ fingerprint
 
 local SKIP_DIR = { target = true, [".git"] = true, [".hg"] = true, [".svn"] = true, node_modules = true }
-local WATCHED = { ["Cargo.toml"] = true, ["build.rs"] = true, ["rust-toolchain"] = true, ["rust-toolchain.toml"] = true }
+local WATCHED =
+  { ["Cargo.toml"] = true, ["build.rs"] = true, ["rust-toolchain"] = true, ["rust-toolchain.toml"] = true }
 local MAX_FILES, MAX_DEPTH, MAX_BYTES = 400, 6, 1024 * 1024
 
 local function digest(path)
@@ -104,8 +104,11 @@ function M.fingerprint(root)
       end
       local relname = rel == "" and name or (rel .. "/" .. name)
       if kind == "file" then
-        if WATCHED[name] or ((name == "config" or name == "config.toml") and vim.fs.basename(dir) == ".cargo")
-          or (name == "run.toml" and vim.fs.basename(dir) == ".xynovim") then
+        if
+          WATCHED[name]
+          or ((name == "config" or name == "config.toml") and vim.fs.basename(dir) == ".cargo")
+          or (name == "run.toml" and vim.fs.basename(dir) == ".xynovim")
+        then
           add(relname, dir .. "/" .. name)
         end
       elseif kind == "directory" and not SKIP_DIR[name] and depth < MAX_DEPTH then
@@ -386,15 +389,29 @@ function M.ask(root, what, cb)
   end
   local timer = vim.uv.new_timer()
   ask_timers[path] = timer
-  timer:start(M.ask_timeout_ms, 0, vim.schedule_wrap(function()
-    if asking[path] == mine then
-      vim.notify(("xyno-rust: the trust prompt for %s got no answer and was dropped (treated as 'do not run')"):format(path), vim.log.levels.WARN)
-      finish(false)
-    end
-  end))
+  timer:start(
+    M.ask_timeout_ms,
+    0,
+    vim.schedule_wrap(function()
+      if asking[path] == mine then
+        vim.notify(
+          ("xyno-rust: the trust prompt for %s got no answer and was dropped (treated as 'do not run')"):format(path),
+          vim.log.levels.WARN
+        )
+        finish(false)
+      end
+    end)
+  )
   local ok, err = pcall(vim.ui.select, choices, {
     prompt = ("Trust %s?\n%s can run code from it (build.rs, proc macros, tests, workflow steps)."):format(path, what)
-      .. (drifted and ("\nTrusted before, but changed since: %s%s"):format(table.concat(vim.list_slice(drifted, 1, 6), ", "), #drifted > 6 and (" and " .. (#drifted - 6) .. " more") or "") or ""),
+      .. (
+        drifted
+          and ("\nTrusted before, but changed since: %s%s"):format(
+            table.concat(vim.list_slice(drifted, 1, 6), ", "),
+            #drifted > 6 and (" and " .. (#drifted - 6) .. " more") or ""
+          )
+        or ""
+      ),
     format_item = function(c)
       return c[1]
     end,
@@ -425,7 +442,10 @@ function M.require(root, what, cb)
   end
   M.ask(root, what, function(ok)
     if not ok then
-      vim.notify(("xyno-rust: %s not run: %s is not a trusted workspace (:RustTrust add)"):format(what, tostring(root)), vim.log.levels.WARN)
+      vim.notify(
+        ("xyno-rust: %s not run: %s is not a trusted workspace (:RustTrust add)"):format(what, tostring(root)),
+        vim.log.levels.WARN
+      )
     end
     cb(ok)
   end)
@@ -463,12 +483,16 @@ function M.command(args)
       return vim.notify("xyno-rust: no trusted workspaces", vim.log.levels.INFO)
     end
     if sub == "" then -- the bare command lists and offers to revoke
-      return vim.ui.select(list, { prompt = "Trusted Rust workspaces (select one to revoke)", format_item = fmt }, function(e)
-        if e then
-          M.revoke(e.root)
-          vim.notify("xyno-rust: revoked " .. e.root)
+      return vim.ui.select(
+        list,
+        { prompt = "Trusted Rust workspaces (select one to revoke)", format_item = fmt },
+        function(e)
+          if e then
+            M.revoke(e.root)
+            vim.notify("xyno-rust: revoked " .. e.root)
+          end
         end
-      end)
+      )
     end
     return vim.notify("xyno-rust trusted workspaces:\n" .. table.concat(vim.tbl_map(fmt, list), "\n"))
   elseif sub == "add" then
@@ -476,16 +500,29 @@ function M.command(args)
     vim.notify("xyno-rust: trusted " .. M.trust(dir))
   elseif sub == "revoke" then
     local dir = target_dir(rest)
-    vim.notify(M.revoke(dir) and ("xyno-rust: revoked " .. M.normalize(dir)) or ("xyno-rust: " .. dir .. " had no entry of its own"), vim.log.levels.INFO)
+    vim.notify(
+      M.revoke(dir) and ("xyno-rust: revoked " .. M.normalize(dir))
+        or ("xyno-rust: " .. dir .. " had no entry of its own"),
+      vim.log.levels.INFO
+    )
   elseif sub == "revoke-all" then
     M.revoke_all()
     vim.notify("xyno-rust: all trust entries revoked")
   elseif sub == "status" then
     local dir = target_dir(rest)
     local ok, by = M.is_trusted(dir)
-    vim.notify(("xyno-rust: %s is %s%s"):format(M.normalize(dir), ok and "trusted" or "NOT trusted", ok and by ~= M.normalize(dir) and (" (under " .. by .. ")") or ""))
+    vim.notify(
+      ("xyno-rust: %s is %s%s"):format(
+        M.normalize(dir),
+        ok and "trusted" or "NOT trusted",
+        ok and by ~= M.normalize(dir) and (" (under " .. by .. ")") or ""
+      )
+    )
   else
-    vim.notify("RustTrust: unknown argument '" .. sub .. "' (list, add, revoke, revoke-all, status)", vim.log.levels.WARN)
+    vim.notify(
+      "RustTrust: unknown argument '" .. sub .. "' (list, add, revoke, revoke-all, status)",
+      vim.log.levels.WARN
+    )
   end
 end
 

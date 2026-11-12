@@ -20,14 +20,16 @@ M.version = "0.3.0"
 function M.compatible(want)
   local wmaj, wmin = tostring(want):match("^(%d+)%.(%d+)$")
   if not wmaj then
-    return false, ("xyno-rust: unreadable api version %q (want \"major.minor\")"):format(tostring(want))
+    return false, ('xyno-rust: unreadable api version %q (want "major.minor")'):format(tostring(want))
   end
   local maj, min = M.api_version:match("^(%d+)%.(%d+)$")
   if tonumber(wmaj) ~= tonumber(maj) then
-    return false, ("xyno-rust api %s is installed, API %s was asked for (another major version)"):format(M.api_version, want)
+    return false,
+      ("xyno-rust api %s is installed, API %s was asked for (another major version)"):format(M.api_version, want)
   end
   if tonumber(wmin) > tonumber(min) then
-    return false, ("xyno-rust api %s is installed, %s or newer is needed: update xyno-rust.nvim"):format(M.api_version, want)
+    return false,
+      ("xyno-rust api %s is installed, %s or newer is needed: update xyno-rust.nvim"):format(M.api_version, want)
   end
   return true
 end
@@ -181,14 +183,24 @@ function M.setup(opts)
   end
   -- the four newest modules are not required at startup: only their commands / FileType hook exist until used
   if m.profile and opts.commands then
-    vim.api.nvim_create_user_command("RustProfile", function(a)
-      require("xyno_rust.profiler").command(a.args)
-    end, { nargs = "?", complete = "file", desc = "In-editor profile view (perf script / collapsed stacks / perf.data)" })
+    vim.api.nvim_create_user_command(
+      "RustProfile",
+      function(a)
+        require("xyno_rust.profiler").command(a.args)
+      end,
+      { nargs = "?", complete = "file", desc = "In-editor profile view (perf script / collapsed stacks / perf.data)" }
+    )
   end
   if m.tokio and opts.commands then
     vim.api.nvim_create_user_command("TokioConsole", function(a)
       require("xyno_rust.tokio").command(a.args)
-    end, { nargs = "?", complete = function() return { "check" } end, desc = "tokio-console: project check, then launch" })
+    end, {
+      nargs = "?",
+      complete = function()
+        return { "check" }
+      end,
+      desc = "tokio-console: project check, then launch",
+    })
   end
   if m.rename and opts.commands then
     vim.api.nvim_create_user_command("RustRename", function(a)
@@ -202,7 +214,12 @@ function M.setup(opts)
       callback = function(ev)
         vim.keymap.set("n", "<LeftMouse>", function()
           return require("xyno_rust.lens_click").click()
-        end, { buffer = ev.buf, expr = true, replace_keycodes = true, desc = "Click a code lens (Run / Debug); otherwise a normal click" })
+        end, {
+          buffer = ev.buf,
+          expr = true,
+          replace_keycodes = true,
+          desc = "Click a code lens (Run / Debug); otherwise a normal click",
+        })
       end,
     })
     for _, b in ipairs(vim.api.nvim_list_bufs()) do

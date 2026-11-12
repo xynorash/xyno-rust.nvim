@@ -33,7 +33,14 @@ describe("snippets", function()
     H.eq("x", M.strip_snippet("x"))
   end)
   it("plain_edit only touches snippet edits and leaves the original alone", function()
-    local e = { documentChanges = { { textDocument = { uri = "file:///x" }, edits = { { newText = "${1:a}", insertTextFormat = 2, range = {} }, { newText = "$1", range = {} } } } } }
+    local e = {
+      documentChanges = {
+        {
+          textDocument = { uri = "file:///x" },
+          edits = { { newText = "${1:a}", insertTextFormat = 2, range = {} }, { newText = "$1", range = {} } },
+        },
+      },
+    }
     local p = M.plain_edit(e)
     H.eq("a", p.documentChanges[1].edits[1].newText)
     H.eq("$1", p.documentChanges[1].edits[2].newText, "plain text is plain")
@@ -48,7 +55,12 @@ describe("edit_diff", function()
     local uri = vim.uri_from_fname(file)
     local d = M.edit_diff({
       documentChanges = {
-        { textDocument = { uri = uri }, edits = { { range = { start = { line = 0, character = 0 }, ["end"] = { line = 1, character = 0 } }, newText = "" } } },
+        {
+          textDocument = { uri = uri },
+          edits = {
+            { range = { start = { line = 0, character = 0 }, ["end"] = { line = 1, character = 0 } }, newText = "" },
+          },
+        },
         { kind = "create", uri = vim.uri_from_fname(dir .. "/src/new.rs") },
         { kind = "rename", oldUri = uri, newUri = vim.uri_from_fname(dir .. "/src/b.rs") },
       },
@@ -61,8 +73,20 @@ describe("edit_diff", function()
   it("an edit that changes nothing is nil; a misfit edit is reported, not thrown", function()
     local dir = H.fixture("fix-lab")
     local uri = vim.uri_from_fname(dir .. "/src/lib.rs")
-    H.is_nil(M.edit_diff({ changes = { [uri] = { { range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 0 } }, newText = "" } } } }))
-    local d = M.edit_diff({ changes = { [uri] = { { range = { start = { line = 999, character = 0 }, ["end"] = { line = 999, character = 5 } }, newText = "x" } } } })
+    H.is_nil(M.edit_diff({
+      changes = {
+        [uri] = {
+          { range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 0 } }, newText = "" },
+        },
+      },
+    }))
+    local d = M.edit_diff({
+      changes = {
+        [uri] = {
+          { range = { start = { line = 999, character = 0 }, ["end"] = { line = 999, character = 5 } }, newText = "x" },
+        },
+      },
+    })
     H.ok(d == nil or d:find("does not fit", 1, true) or d:find("x", 1, true))
   end)
 end)
@@ -112,14 +136,30 @@ describe("menu on a real rust-analyzer", function()
     local shown
     local ctx = {
       item = item,
-      picker = { closed = false, current = function() return item end },
+      picker = {
+        closed = false,
+        current = function()
+          return item
+        end,
+      },
       preview = {
-        reset = function() end, minimal = function() end, set_title = function() end,
-        set_lines = function(_, l) shown = l end, highlight = function() end,
-        win = { buf_valid = function() return true end },
+        reset = function() end,
+        minimal = function() end,
+        set_title = function() end,
+        set_lines = function(_, l)
+          shown = l
+        end,
+        highlight = function() end,
+        win = {
+          buf_valid = function()
+            return true
+          end,
+        },
       },
     }
-    ctx.preview.set_lines = function(_, l) shown = l end
+    ctx.preview.set_lines = function(_, l)
+      shown = l
+    end
     m.opts.preview(ctx)
     H.wait_for(function()
       return shown and shown[1] ~= "resolving ..."
@@ -131,7 +171,11 @@ describe("menu on a real rust-analyzer", function()
     -- the buffer is untouched until confirm
     H.not_ok(text(buf):find("var_name", 1, true))
     local closed
-    m.opts.confirm({ close = function() closed = true end }, item)
+    m.opts.confirm({
+      close = function()
+        closed = true
+      end,
+    }, item)
     H.wait_for(function()
       return text(buf):find("var_name", 1, true)
     end, 20000, "the edit")
@@ -223,7 +267,11 @@ describe("fix-all merging (fake edits)", function()
     return { start = { line = l1, character = c1 }, ["end"] = { line = l2, character = c2 } }
   end
   local function act(uri, edits, extra)
-    return vim.tbl_extend("force", { title = "t", edit = { documentChanges = { { textDocument = { uri = uri }, edits = edits } } } }, extra or {})
+    return vim.tbl_extend(
+      "force",
+      { title = "t", edit = { documentChanges = { { textDocument = { uri = uri }, edits = edits } } } },
+      extra or {}
+    )
   end
   local function scratch(lines)
     local f = H.tmpdir() .. "/a.rs"

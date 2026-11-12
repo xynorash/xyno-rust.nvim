@@ -17,7 +17,7 @@ local function slow_tools(secs)
   local real_cargo, real_rustup = vim.fn.exepath("cargo"), vim.fn.exepath("rustup")
   for name, real in pairs({ cargo = real_cargo, rustup = real_rustup }) do
     local f = assert(io.open(dir .. "/" .. name, "w"))
-    f:write(("#!/bin/sh\necho \"%s $*\" >> %s\nsleep %s\nexec %s \"$@\"\n"):format(name, log, secs, real))
+    f:write(('#!/bin/sh\necho "%s $*" >> %s\nsleep %s\nexec %s "$@"\n'):format(name, log, secs, real))
     f:close()
     vim.uv.fs_chmod(dir .. "/" .. name, 493)
   end
@@ -163,20 +163,27 @@ describe("cargo.metadata_async", function()
     H.match(err, "timed out", true)
   end)
 
-  it("the synchronous wrapper still answers (callers like xyno-crates need it) and pumps events while it waits", function()
-    slow_tools(0.3)
-    local dir = H.fixture("basic")
-    local ticks = 0
-    local t = vim.uv.new_timer()
-    t:start(10, 10, vim.schedule_wrap(function()
-      ticks = ticks + 1
-    end))
-    local meta = cargo.metadata(dir)
-    t:stop()
-    t:close()
-    H.eq("basic", meta.packages[1].name)
-    H.ok(ticks > 5, "scheduled work kept running during the wait: " .. ticks)
-  end)
+  it(
+    "the synchronous wrapper still answers (callers like xyno-crates need it) and pumps events while it waits",
+    function()
+      slow_tools(0.3)
+      local dir = H.fixture("basic")
+      local ticks = 0
+      local t = vim.uv.new_timer()
+      t:start(
+        10,
+        10,
+        vim.schedule_wrap(function()
+          ticks = ticks + 1
+        end)
+      )
+      local meta = cargo.metadata(dir)
+      t:stop()
+      t:close()
+      H.eq("basic", meta.packages[1].name)
+      H.ok(ticks > 5, "scheduled work kept running during the wait: " .. ticks)
+    end
+  )
 end)
 
 describe("rust_context.root: cargo's answer without freezing the editor", function()
@@ -213,21 +220,24 @@ describe("rust_context.root: cargo's answer without freezing the editor", functi
     H.ok(stall < 250, ("stalled %.0f ms"):format(stall))
   end)
 
-  it("root(path, { nowait = true }) returns at once from the file system and fills the cache for the next call", function()
-    local log = slow_tools(0.5)
-    local ws = H.fixture("workspace")
-    local t0 = vim.uv.hrtime()
-    local first = rc.root(ws .. "/app/src/main.rs", { nowait = true })
-    H.ok((vim.uv.hrtime() - t0) / 1e6 < 200, "did not wait for the 500 ms cargo")
-    H.eq(ws, first)
-    H.wait_for(function()
-      return #calls(log) >= 1 and cargo.pending() == 0
-    end, 10000, "background locate")
-    t0 = vim.uv.hrtime()
-    H.eq(ws, rc.root(ws .. "/app/src/main.rs"))
-    H.ok((vim.uv.hrtime() - t0) / 1e6 < 100, "the warm synchronous root does not run cargo again")
-    H.eq(1, #calls(log))
-  end)
+  it(
+    "root(path, { nowait = true }) returns at once from the file system and fills the cache for the next call",
+    function()
+      local log = slow_tools(0.5)
+      local ws = H.fixture("workspace")
+      local t0 = vim.uv.hrtime()
+      local first = rc.root(ws .. "/app/src/main.rs", { nowait = true })
+      H.ok((vim.uv.hrtime() - t0) / 1e6 < 200, "did not wait for the 500 ms cargo")
+      H.eq(ws, first)
+      H.wait_for(function()
+        return #calls(log) >= 1 and cargo.pending() == 0
+      end, 10000, "background locate")
+      t0 = vim.uv.hrtime()
+      H.eq(ws, rc.root(ws .. "/app/src/main.rs"))
+      H.ok((vim.uv.hrtime() - t0) / 1e6 < 100, "the warm synchronous root does not run cargo again")
+      H.eq(1, #calls(log))
+    end
+  )
 
   it("a cold synchronous root waits at most wait_ms for cargo and then falls back to the file system", function()
     slow_tools(30)

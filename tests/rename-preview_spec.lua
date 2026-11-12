@@ -13,7 +13,8 @@ end)
 local function edit_of(uri, n)
   local e = {}
   for i = 1, n do
-    e[#e + 1] = { range = { start = { line = i - 1, character = 0 }, ["end"] = { line = i - 1, character = 1 } }, newText = "X" }
+    e[#e + 1] =
+      { range = { start = { line = i - 1, character = 0 }, ["end"] = { line = i - 1, character = 1 } }, newText = "X" }
   end
   return e
 end
@@ -74,23 +75,37 @@ describe(":RustRename (real rust-analyzer)", function()
     wait_analysed(buf)
     vim.api.nvim_win_set_cursor(0, { 1, 8 })
     local got
-    R.rename("assist", { pick = function(items, popts) got = { items = items, popts = popts } end })
-    H.wait_for(function() return got end, 60000, "rename edit")
-    local names = vim.tbl_map(function(i) return i.text end, got.items)
+    R.rename("assist", {
+      pick = function(items, popts)
+        got = { items = items, popts = popts }
+      end,
+    })
+    H.wait_for(function()
+      return got
+    end, 60000, "rename edit")
+    local names = vim.tbl_map(function(i)
+      return i.text
+    end, got.items)
     H.eq({ "src/lib.rs", "src/main.rs", "src/util.rs" }, names)
     local counts = {}
-    for _, i in ipairs(got.items) do counts[i.text] = i.count end
+    for _, i in ipairs(got.items) do
+      counts[i.text] = i.count
+    end
     H.eq({ ["src/lib.rs"] = 2, ["src/main.rs"] = 1, ["src/util.rs"] = 2 }, counts)
     H.match(got.items[1].diff, "-    util::helper() + util::helper()", true)
     H.match(got.items[1].diff, "+    util::assist() + util::assist()", true)
     H.match(got.popts.title, "5 edit(s) in 3 file(s)", true)
     -- untick main.rs, apply
     for _, i in ipairs(got.items) do
-      if i.text == "src/main.rs" then i.excluded = true end
+      if i.text == "src/main.rs" then
+        i.excluded = true
+      end
     end
     local n = H.capture_notify()
     got.popts.confirm({ close = function() end }, nil)
-    local function file(rel) return table.concat(vim.fn.readfile(dir .. "/" .. rel), "\n") end
+    local function file(rel)
+      return table.concat(vim.fn.readfile(dir .. "/" .. rel), "\n")
+    end
     -- applied to buffers (not written): read the buffers
     local function buftext(rel)
       local b = vim.fn.bufnr(dir .. "/" .. rel)
@@ -100,7 +115,9 @@ describe(":RustRename (real rust-analyzer)", function()
     H.match(buftext("src/util.rs"), "pub fn assist()", true)
     H.match(buftext("src/util.rs"), "assist() * 2", true)
     H.match(file("src/main.rs"), "util::helper()", true)
-    H.eq(1, #vim.tbl_filter(function(x) return x.msg:find("1 file(s) were left out", 1, true) end, n.list))
+    H.eq(1, #vim.tbl_filter(function(x)
+      return x.msg:find("1 file(s) were left out", 1, true)
+    end, n.list))
   end)
 
   it("a module rename carries its file operation", function()
@@ -111,16 +128,28 @@ describe(":RustRename (real rust-analyzer)", function()
     vim.api.nvim_win_set_cursor(0, { 1, 8 }) -- `util` in `pub mod util;`
     local got
     H.wait_for(function()
-      if got then return true end
-      R.rename("tools", { pick = function(items) got = items end })
-      vim.wait(1500, function() return got ~= nil end)
+      if got then
+        return true
+      end
+      R.rename("tools", {
+        pick = function(items)
+          got = items
+        end,
+      })
+      vim.wait(1500, function()
+        return got ~= nil
+      end)
       return got
     end, 90000, "module rename edit (retried until rust-analyzer has indexed the module)")
     local ops
     for _, i in ipairs(got) do
-      if i.ops then ops = i end
+      if i.ops then
+        ops = i
+      end
     end
-    H.ok(ops, "file operation entry: " .. vim.inspect(vim.tbl_map(function(i) return i.text end, got)))
+    H.ok(ops, "file operation entry: " .. vim.inspect(vim.tbl_map(function(i)
+      return i.text
+    end, got)))
     H.match(ops.diff, "rename ", true)
     H.match(ops.diff, "tools.rs", true)
     H.eq(lib ~= nil, true)

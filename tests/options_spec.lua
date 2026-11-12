@@ -27,13 +27,38 @@ end
 
 describe("tools option", function()
   it("the default list is the nine built-in tools", function()
-    H.eq({ "timings", "bloat_crates", "bloat_functions", "machete", "deny_fetch", "deny_check", "audit", "tree_dups", "llvm_cov" }, texts())
+    H.eq({
+      "timings",
+      "bloat_crates",
+      "bloat_functions",
+      "machete",
+      "deny_fetch",
+      "deny_check",
+      "audit",
+      "tree_dups",
+      "llvm_cov",
+    }, texts())
   end)
 
   it("hide removes by id, extra appends", function()
-    local notes = setup_capture({ tools = { hide = { "audit", "machete" }, extra = { { text = "typos", cmd = { "typos" } }, { text = "doc", cmd = { "cargo", "doc" }, flags = true } } } })
+    local notes = setup_capture({
+      tools = {
+        hide = { "audit", "machete" },
+        extra = { { text = "typos", cmd = { "typos" } }, { text = "doc", cmd = { "cargo", "doc" }, flags = true } },
+      },
+    })
     H.eq(0, #notes)
-    H.eq({ "timings", "bloat_crates", "bloat_functions", "deny_fetch", "deny_check", "tree_dups", "llvm_cov", "typos", "doc" }, texts())
+    H.eq({
+      "timings",
+      "bloat_crates",
+      "bloat_functions",
+      "deny_fetch",
+      "deny_check",
+      "tree_dups",
+      "llvm_cov",
+      "typos",
+      "doc",
+    }, texts())
   end)
 
   it("a second setup() replaces the first one's tools", function()
@@ -43,9 +68,21 @@ describe("tools option", function()
   end)
 
   it("bad tools give one warning and the default list stays", function()
-    local notes = setup_capture({ tools = { hide = { "nope" }, extra = { { text = "x", cmd = "cargo doc" }, { text = "y\nz", cmd = { "a" } }, { cmd = { "a" }, shell = true } }, bogus = 1 } })
+    local notes = setup_capture({
+      tools = {
+        hide = { "nope" },
+        extra = { { text = "x", cmd = "cargo doc" }, { text = "y\nz", cmd = { "a" } }, { cmd = { "a" }, shell = true } },
+        bogus = 1,
+      },
+    })
     H.eq(1, #notes)
-    for _, frag in ipairs({ "unknown tool `nope`", "extra[1].cmd must be a non-empty argv list", "extra[2].text must be a one-line string", "extra[3]: unknown key `shell`", "unknown tools option `bogus`" }) do
+    for _, frag in ipairs({
+      "unknown tool `nope`",
+      "extra[1].cmd must be a non-empty argv list",
+      "extra[2].text must be a one-line string",
+      "extra[3]: unknown key `shell`",
+      "unknown tools option `bogus`",
+    }) do
       H.match(notes[1].msg, frag, true)
     end
     H.eq(9, #tasks.tool_list())
@@ -56,7 +93,12 @@ describe("other options are validated too", function()
   it("wrong types and unknown modules: one warning, the valid parts apply", function()
     local notes = setup_capture({ commands = "yes", modules = { routes = "no", nothing = true }, keymaps = 3 })
     H.eq(1, #notes)
-    for _, frag in ipairs({ "commands must be a boolean", "module `routes` must be a boolean", "unknown module `nothing`", "keymaps must be false, true or a table" }) do
+    for _, frag in ipairs({
+      "commands must be a boolean",
+      "module `routes` must be a boolean",
+      "unknown module `nothing`",
+      "keymaps must be false, true or a table",
+    }) do
       H.match(notes[1].msg, frag, true)
     end
     setup_capture({})

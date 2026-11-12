@@ -71,7 +71,13 @@ function M.items(edit, enc)
     }
   end
   if ops then
-    items[#items + 1] = { text = "file operations", ops = true, edit = ops, count = #ops.documentChanges, diff = am.edit_diff(ops, enc) or "(none)" }
+    items[#items + 1] = {
+      text = "file operations",
+      ops = true,
+      edit = ops,
+      count = #ops.documentChanges,
+      diff = am.edit_diff(ops, enc) or "(none)",
+    }
   end
   return items
 end
@@ -162,7 +168,12 @@ function M.preview(edit, enc, name, opts)
       end,
     },
     win = {
-      input = { keys = { ["<Tab>"] = { "rn_toggle", mode = { "i", "n" } }, ["<C-Space>"] = { "rn_toggle", mode = { "i", "n" } } } },
+      input = {
+        keys = {
+          ["<Tab>"] = { "rn_toggle", mode = { "i", "n" } },
+          ["<C-Space>"] = { "rn_toggle", mode = { "i", "n" } },
+        },
+      },
       list = { keys = { ["<Tab>"] = "rn_toggle", ["<C-Space>"] = "rn_toggle" } },
     },
   }

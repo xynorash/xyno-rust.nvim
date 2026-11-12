@@ -150,7 +150,12 @@ function M.sanitize(c)
     return nil
   end
   local cmd = vim.tbl_contains(M.CMDS, c.cmd) and c.cmd or "run"
-  local out = { name = vim.trim(c.name), cmd = cmd, cargo_args = type(c.cargo_args) == "string" and c.cargo_args or "", args = type(c.args) == "string" and c.args or "" }
+  local out = {
+    name = vim.trim(c.name),
+    cmd = cmd,
+    cargo_args = type(c.cargo_args) == "string" and c.cargo_args or "",
+    args = type(c.args) == "string" and c.args or "",
+  }
   if type(c.package) == "string" and c.package ~= "" then
     out.package = c.package
   end
@@ -263,7 +268,12 @@ function M.load_all(root)
     end
   end
   local last = cur.last
-  if last and not vim.tbl_contains(vim.tbl_map(function(c) return c.name end, out), last) then
+  if last and not vim.tbl_contains(
+    vim.tbl_map(function(c)
+      return c.name
+    end, out),
+    last
+  ) then
     last = nil
   end
   return { configs = out, last = last, shared = sh }
@@ -321,7 +331,11 @@ end
 --- The TOML text of a list of configurations (what `share` writes).
 function M.to_toml(list)
   local q = require("xyno_rust.toml_mini").quote
-  local out = { "# Run configurations shared through the repository (xyno-rust.nvim). Opened only in a trusted", "# workspace (:RustTrust). `args` and `cargo_args` are split into an argv list, never run by a shell.", "" }
+  local out = {
+    "# Run configurations shared through the repository (xyno-rust.nvim). Opened only in a trusted",
+    "# workspace (:RustTrust). `args` and `cargo_args` are split into an argv list, never run by a shell.",
+    "",
+  }
   for _, c in ipairs(list) do
     out[#out + 1] = "[[run]]"
     out[#out + 1] = "name = " .. q(c.name)
@@ -438,7 +452,8 @@ end
 
 -- ------------------------------------------------------------ command line
 
-local FEATURE_FLAGS = { ["--features"] = true, ["-F"] = true, ["--all-features"] = true, ["--no-default-features"] = true }
+local FEATURE_FLAGS =
+  { ["--features"] = true, ["-F"] = true, ["--all-features"] = true, ["--no-default-features"] = true }
 
 local function names_features(words)
   for _, w in ipairs(words) do
@@ -490,7 +505,7 @@ function M.build(cfg, ctx_flags, meta)
     if cfg.profiler == "samply" or cfg.profiler == "perf" then
       local pkg
       for _, p in ipairs(meta and meta.packages or {}) do
-        if (not cfg.package or p.name == cfg.package) then
+        if not cfg.package or p.name == cfg.package then
           for _, t in ipairs(p.targets) do
             if t.name == cfg.bin and t.kind[1] == "bin" then
               pkg = pkg or p
@@ -501,7 +516,11 @@ function M.build(cfg, ctx_flags, meta)
       if not pkg or not meta then
         return nil, ("binary %q not found in cargo metadata"):format(cfg.bin)
       end
-      local exe = ("%s/profiling/%s%s"):format(meta.target_directory, cfg.bin, vim.fn.has("win32") == 1 and ".exe" or "")
+      local exe = ("%s/profiling/%s%s"):format(
+        meta.target_directory,
+        cfg.bin,
+        vim.fn.has("win32") == 1 and ".exe" or ""
+      )
       -- `--target T` is not supported here: the path would change; say so instead of recording the wrong binary
       if vim.tbl_contains(cargo_extra, "--target") then
         return nil, "samply: --target changes the binary's path; remove it from the cargo arguments"
@@ -520,7 +539,7 @@ function M.build(cfg, ctx_flags, meta)
         local dir = meta.target_directory .. "/xyno-profile"
         local d = vim.fn.shellescape(dir)
         local line = bs
-          .. (" && mkdir -p %s && perf record -F 999 --call-graph dwarf,16384 -o %s/perf.data -- \"$@\""):format(d, d)
+          .. (' && mkdir -p %s && perf record -F 999 --call-graph dwarf,16384 -o %s/perf.data -- "$@"'):format(d, d)
           .. (" && perf script -i %s/perf.data > %s/perf.script && echo 'profile ready: :RustProfile'"):format(d, d)
         local argv = { "sh", "-c", line, "perf", exe }
         vim.list_extend(argv, prog)
@@ -587,7 +606,8 @@ local function open(argv, env, root)
   if old and old.buf_valid and old:buf_valid() then
     pcall(old.close, old, { buf = true })
   end
-  M._last_term = Snacks.terminal.open(argv, { cwd = root, env = env, auto_close = false, win = { position = "bottom" } })
+  M._last_term =
+    Snacks.terminal.open(argv, { cwd = root, env = env, auto_close = false, win = { position = "bottom" } })
   return M._last_term
 end
 -- specs replace this to see what would run
@@ -655,7 +675,8 @@ function M.prompt(root, meta, cfg, done)
       local k = t.kind[1]
       k = (k == "proc-macro" or k == "rlib" or k == "cdylib" or k == "staticlib" or k == "dylib") and "lib" or k
       if vim.tbl_contains(TARGET_KEYS, k) then
-        targets[#targets + 1] = { text = ("%s %s (%s)"):format(k, t.name, p.name), kind = k, name = t.name, package = p.name }
+        targets[#targets + 1] =
+          { text = ("%s %s (%s)"):format(k, t.name, p.name), kind = k, name = t.name, package = p.name }
       end
     end
   end
@@ -787,8 +808,12 @@ function M.edit(root, meta, old)
 end
 
 local function describe(c)
-  local t = c.bin and ("bin " .. c.bin) or c.example and ("example " .. c.example) or c.test and ("test " .. c.test)
-    or c.bench and ("bench " .. c.bench) or c.lib and "lib" or "workspace"
+  local t = c.bin and ("bin " .. c.bin)
+    or c.example and ("example " .. c.example)
+    or c.test and ("test " .. c.test)
+    or c.bench and ("bench " .. c.bench)
+    or c.lib and "lib"
+    or "workspace"
   local extra = {}
   if c.args ~= "" then
     extra[#extra + 1] = "-- " .. c.args
@@ -820,7 +845,10 @@ function M.pick()
       vim.notify("xyno-rust: " .. cur.shared.err, vim.log.levels.WARN)
     elseif cur.shared.exists and not cur.shared.trusted then
       vim.notify(
-        ("xyno-rust: %s has %d shared run configuration(s); they are listed after :RustTrust for this workspace"):format(M.SHARED_PATH, cur.shared.count),
+        ("xyno-rust: %s has %d shared run configuration(s); they are listed after :RustTrust for this workspace"):format(
+          M.SHARED_PATH,
+          cur.shared.count
+        ),
         vim.log.levels.INFO
       )
     end
@@ -865,21 +893,32 @@ function M.pick()
       actions = {
         rr_edit = reopen(function(item)
           if item and item.cfg and item.cfg.shared then
-            vim.notify(("xyno-rust: %q is shared: edit %s (or run it, then copy it with :RustRunEdit)"):format(item.cfg.name, M.SHARED_PATH), vim.log.levels.INFO)
+            vim.notify(
+              ("xyno-rust: %q is shared: edit %s (or run it, then copy it with :RustRunEdit)"):format(
+                item.cfg.name,
+                M.SHARED_PATH
+              ),
+              vim.log.levels.INFO
+            )
           elseif item and item.cfg then
             M.edit(root, meta, item.cfg)
           end
         end),
         rr_delete = reopen(function(item)
           if item and item.cfg and item.cfg.shared then
-            vim.notify(("xyno-rust: %q is shared: remove it from %s"):format(item.cfg.name, M.SHARED_PATH), vim.log.levels.INFO)
+            vim.notify(
+              ("xyno-rust: %q is shared: remove it from %s"):format(item.cfg.name, M.SHARED_PATH),
+              vim.log.levels.INFO
+            )
           elseif item and item.cfg and M.delete(root, item.cfg.name) then
             vim.notify(("xyno-rust: deleted %q"):format(item.cfg.name))
           end
         end),
       },
       win = {
-        input = { keys = { ["<C-e>"] = { "rr_edit", mode = { "i", "n" } }, ["<C-x>"] = { "rr_delete", mode = { "i", "n" } } } },
+        input = {
+          keys = { ["<C-e>"] = { "rr_edit", mode = { "i", "n" } }, ["<C-x>"] = { "rr_delete", mode = { "i", "n" } } },
+        },
         list = { keys = { ["<C-e>"] = "rr_edit", ["<C-x>"] = "rr_delete" } },
       },
     })
@@ -932,7 +971,13 @@ function M.setup(opts)
     else
       M.pick()
     end
-  end, { nargs = "?", complete = function(lead) return names(lead) end, desc = "Run a saved cargo run configuration (picker)" })
+  end, {
+    nargs = "?",
+    complete = function(lead)
+      return names(lead)
+    end,
+    desc = "Run a saved cargo run configuration (picker)",
+  })
   cmd("RustRunLast", function()
     M.run_named(nil)
   end, { desc = "Run the previous run configuration again" })
@@ -944,7 +989,13 @@ function M.setup(opts)
       end
       M.edit(root, meta, c or nil)
     end)
-  end, { nargs = "?", complete = function(lead) return names(lead) end, desc = "Edit (or create) a run configuration" })
+  end, {
+    nargs = "?",
+    complete = function(lead)
+      return names(lead)
+    end,
+    desc = "Edit (or create) a run configuration",
+  })
   cmd("RustRunShare", function(a)
     with_workspace(function(root)
       local ok, err = M.share(root, a.args)
@@ -954,7 +1005,13 @@ function M.setup(opts)
         vim.notify("xyno-rust: " .. tostring(err), vim.log.levels.WARN)
       end
     end)
-  end, { nargs = 1, complete = function(lead) return names(lead) end, desc = "Copy a run configuration into .xynovim/run.toml (shared through the repository)" })
+  end, {
+    nargs = 1,
+    complete = function(lead)
+      return names(lead)
+    end,
+    desc = "Copy a run configuration into .xynovim/run.toml (shared through the repository)",
+  })
   cmd("RustRunDelete", function(a)
     with_workspace(function(root)
       if M.delete(root, a.args) then
@@ -963,7 +1020,13 @@ function M.setup(opts)
         vim.notify(("xyno-rust: no run configuration %q"):format(a.args), vim.log.levels.WARN)
       end
     end)
-  end, { nargs = 1, complete = function(lead) return names(lead) end, desc = "Delete a run configuration" })
+  end, {
+    nargs = 1,
+    complete = function(lead)
+      return names(lead)
+    end,
+    desc = "Delete a run configuration",
+  })
 end
 
 return M

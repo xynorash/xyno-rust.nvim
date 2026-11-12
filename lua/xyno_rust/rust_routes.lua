@@ -225,7 +225,7 @@ function M.pick()
         slow:close()
       end
       if #items == 0 then
-        return vim.notify("no routes found (.route(\"/p\", ..) or #[get(\"/p\")])", vim.log.levels.INFO)
+        return vim.notify('no routes found (.route("/p", ..) or #[get("/p")])', vim.log.levels.INFO)
       end
       local Snacks = require("xyno_rust.deps").snacks()
       if not Snacks then

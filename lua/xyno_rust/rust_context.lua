@@ -174,7 +174,13 @@ local function sanitize(ctx, root)
   if #rejected > 0 and root and not warned[root] then
     warned[root] = true
     vim.schedule(function()
-      vim.notify(("xyno-rust: ignored invalid feature/target value(s) in the context of %s: %s"):format(root, table.concat(rejected, ", ")), vim.log.levels.WARN)
+      vim.notify(
+        ("xyno-rust: ignored invalid feature/target value(s) in the context of %s: %s"):format(
+          root,
+          table.concat(rejected, ", ")
+        ),
+        vim.log.levels.WARN
+      )
     end)
   end
   return out
@@ -260,7 +266,8 @@ function M.describe(ctx)
   if ctx.all then
     parts[#parts + 1] = "all features"
   else
-    parts[#parts + 1] = "features: " .. ((ctx.features and #ctx.features > 0) and table.concat(ctx.features, ",") or "(none)")
+    parts[#parts + 1] = "features: "
+      .. ((ctx.features and #ctx.features > 0) and table.concat(ctx.features, ",") or "(none)")
     if ctx.no_default then
       parts[#parts + 1] = "no default"
     end
@@ -427,7 +434,10 @@ function M.setup(opts)
         vim.notify("Rust context: " .. M.describe(M.get(root)))
       end)
     elseif a.args ~= "" then
-      vim.notify("RustContext: unknown argument '" .. a.args .. "' (use show or reset, or no argument for the picker)", vim.log.levels.WARN)
+      vim.notify(
+        "RustContext: unknown argument '" .. a.args .. "' (use show or reset, or no argument for the picker)",
+        vim.log.levels.WARN
+      )
     else
       M.pick()
     end

@@ -42,7 +42,9 @@ local function make_workspace()
   for _, n in ipairs({ "util", "opt", "dev_only", "builder" }) do
     write(
       ("%s/%s/Cargo.toml"):format(root, n),
-      ('[package]\nname = "%s"\nversion = "0.2.0"\nedition = "2021"\n\n[features]\nfast = []\nextra = ["fast"]\n'):format(n)
+      ('[package]\nname = "%s"\nversion = "0.2.0"\nedition = "2021"\n\n[features]\nfast = []\nextra = ["fast"]\n'):format(
+        n
+      )
     )
     write(("%s/%s/src/lib.rs"):format(root, n), "pub fn f() {}\n")
   end
@@ -66,7 +68,10 @@ builder = { path = "../builder" }
 ]]
   )
   write(root .. "/app/build.rs", "fn main() {}\n")
-  write(root .. "/app/src/main.rs", "mod net;\nmod inline_mod {}\nstruct Local;\nmacro_rules! shout { () => {}; }\nfn main() {}\n")
+  write(
+    root .. "/app/src/main.rs",
+    "mod net;\nmod inline_mod {}\nstruct Local;\nmacro_rules! shout { () => {}; }\nfn main() {}\n"
+  )
   write(root .. "/app/src/lib.rs", "pub mod net;\n")
   write(root .. "/app/src/net.rs", "pub mod http;\n")
   write(root .. "/app/src/net/http.rs", "")
@@ -175,9 +180,12 @@ describe("crate_meta.metadata", function()
     H.ok(not rawequal(a, b), "recomputed after the member manifest changed")
     write(f, txt:gsub('version = "0.1.0"', 'version = "0.1.1"'))
     local c = cm.metadata(root)
-    H.eq("0.1.1", vim.tbl_filter(function(m)
-      return m.name == "app"
-    end, c.members)[1].version)
+    H.eq(
+      "0.1.1",
+      vim.tbl_filter(function(m)
+        return m.name == "app"
+      end, c.members)[1].version
+    )
     -- refresh forces
     H.ok(not rawequal(c, cm.metadata(root, { refresh = true })))
   end)
@@ -248,7 +256,15 @@ describe("crate_meta registry and sources", function()
     local home = H.tmpdir()
     stub(cm.config, "cargo_home", home)
     local reg = home .. "/registry/src/index.crates.io-test"
-    for _, d in ipairs({ "serde-1.0.9", "serde-1.0.10", "serde-0.9.15", "serde_json-1.0.1", "serde-1.0.11-rc.1", "foo-bar-1.0.0", "foo-2.0.0" }) do
+    for _, d in ipairs({
+      "serde-1.0.9",
+      "serde-1.0.10",
+      "serde-0.9.15",
+      "serde_json-1.0.1",
+      "serde-1.0.11-rc.1",
+      "foo-bar-1.0.0",
+      "foo-2.0.0",
+    }) do
       write(reg .. "/" .. d .. "/Cargo.toml", ('[package]\nname = "%s"\n'):format(d))
       write(reg .. "/" .. d .. "/src/lib.rs", "// lib of " .. d .. "\n")
     end
@@ -334,7 +350,13 @@ end)
 -- ------------------------------------------------------------ crates.io client
 
 local INDEX_SERDE = table.concat({
-  vim.json.encode({ name = "serde", vers = "1.0.1", yanked = false, features = { derive = { "serde_derive" } }, deps = {} }),
+  vim.json.encode({
+    name = "serde",
+    vers = "1.0.1",
+    yanked = false,
+    features = { derive = { "serde_derive" } },
+    deps = {},
+  }),
   vim.json.encode({
     name = "serde",
     vers = "1.0.9",
@@ -358,7 +380,14 @@ local API_SERDE = vim.json.encode({
 
 local SEARCH = vim.json.encode({
   crates = {
-    { name = "serde", max_version = "1.0.9", max_stable_version = "1.0.9", description = "ser/de", downloads = 10, recent_downloads = 2 },
+    {
+      name = "serde",
+      max_version = "1.0.9",
+      max_stable_version = "1.0.9",
+      description = "ser/de",
+      downloads = 10,
+      recent_downloads = 2,
+    },
     { name = "bad name;rm", max_version = "1.0.0" },
     { name = "serde_json", max_version = "1.1.0-beta.1", description = "json", downloads = 5 },
   },
@@ -392,7 +421,8 @@ end
 describe("crate_meta crates.io client (faked curl)", function()
   it("reads the index: versions, merged features, implicit features, yanked, junk lines", function()
     cache_setup()
-    local calls = fake_curl({ ["index.crates.io/se/rd/serde"] = { body = INDEX_SERDE }, ["/crates/serde"] = { body = API_SERDE } })
+    local calls =
+      fake_curl({ ["index.crates.io/se/rd/serde"] = { body = INDEX_SERDE }, ["/crates/serde"] = { body = API_SERDE } })
     local info, err = cm.info("serde")
     H.ok(info, err)
     H.eq(3, #info.versions, "junk and invalid lines are dropped")
@@ -498,7 +528,11 @@ describe("crate_meta crates.io client (faked curl)", function()
 
   it("has async variants", function()
     cache_setup()
-    fake_curl({ ["index.crates.io"] = { body = INDEX_SERDE }, ["/crates/"] = { body = API_SERDE }, ["/crates?q="] = { body = SEARCH } })
+    fake_curl({
+      ["index.crates.io"] = { body = INDEX_SERDE },
+      ["/crates/"] = { body = API_SERDE },
+      ["/crates?q="] = { body = SEARCH },
+    })
     local info, list
     cm.info_async("serde", function(i)
       info = i
@@ -552,7 +586,9 @@ describe("crate_meta crates.io client (network)", function()
     if vim.fn.executable("curl") ~= 1 then
       return false, "curl not found"
     end
-    local r = vim.system({ "curl", "-sS", "--max-time", "5", "-o", "/dev/null", "https://index.crates.io/config.json" }):wait(8000)
+    local r = vim
+      .system({ "curl", "-sS", "--max-time", "5", "-o", "/dev/null", "https://index.crates.io/config.json" })
+      :wait(8000)
     if r.code ~= 0 then
       return false, "no network to crates.io"
     end
@@ -709,7 +745,9 @@ local function edit_action(buf, title, kind, text)
     isPreferred = title:find("Import") ~= nil,
     edit = {
       changes = {
-        [uri] = { { range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 0 } }, newText = text } },
+        [uri] = {
+          { range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 0 } }, newText = text },
+        },
       },
     },
   }
@@ -733,8 +771,13 @@ describe("code_actions (fake client)", function()
         { title = "Run it", kind = "source", command = { title = "Run it", command = "ra.run", arguments = { 1 } } },
       },
     })
-    local diag = { lnum = 1, col = 5, end_lnum = 1, end_col = 8, message = "unresolved", severity = 1, source = "rustc" }
-    local list, errs = ca.request_wait(buf, { start = { 1, 5 }, ["end"] = { 1, 8 } }, { diagnostics = { diag }, only = { "quickfix" } })
+    local diag =
+      { lnum = 1, col = 5, end_lnum = 1, end_col = 8, message = "unresolved", severity = 1, source = "rustc" }
+    local list, errs = ca.request_wait(
+      buf,
+      { start = { 1, 5 }, ["end"] = { 1, 8 } },
+      { diagnostics = { diag }, only = { "quickfix" } }
+    )
     H.is_nil(errs)
     H.eq(3, #list, "disabled actions are dropped")
     local p = c.requests[1].params
@@ -832,7 +875,9 @@ describe("code_actions (fake client)", function()
 
   it("runs the command of an action through workspace/executeCommand", function()
     local c = fake_client({
-      ["textDocument/codeAction"] = { { title = "Run", kind = "source", command = { title = "Run", command = "ra.run", arguments = { "a" } } } },
+      ["textDocument/codeAction"] = {
+        { title = "Run", kind = "source", command = { title = "Run", command = "ra.run", arguments = { "a" } } },
+      },
       ["workspace/executeCommand"] = {},
     })
     local ok, err = ca.apply(ca.request_wait(buf, { 0, 0 })[1])
@@ -845,7 +890,13 @@ describe("code_actions (fake client)", function()
   it("applies several edits as one undo step", function()
     fake_client({ ["textDocument/codeAction"] = {} })
     local function act(text)
-      return { title = text, kind = "quickfix", edit = edit_action(buf, text, "quickfix", text).edit, client_id = 4242, bufnr = buf }
+      return {
+        title = text,
+        kind = "quickfix",
+        edit = edit_action(buf, text, "quickfix", text).edit,
+        client_id = 4242,
+        bufnr = buf,
+      }
     end
     vim.cmd("setlocal undolevels=1000")
     vim.cmd("normal! ix") -- an earlier, separate undo step
@@ -913,7 +964,12 @@ describe("code_actions (real rust-analyzer)", function()
     vim.cmd("edit!")
     buf = vim.api.nvim_get_current_buf()
     H.start_ra(buf, dir)
-    local hits = ca.wait_for(buf, { 1, 5 }, { kind = "quickfix", title = "^Import `std::collections::HashMap`" }, { timeout = 90000 })
+    local hits = ca.wait_for(
+      buf,
+      { 1, 5 },
+      { kind = "quickfix", title = "^Import `std::collections::HashMap`" },
+      { timeout = 90000 }
+    )
     H.ok(#hits >= 1, "rust-analyzer offered the import")
     local ok, err = ca.apply(hits[1])
     H.ok(ok, err)

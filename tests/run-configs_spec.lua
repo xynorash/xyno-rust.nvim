@@ -57,7 +57,15 @@ describe("sanitize", function()
     H.is_nil(R.sanitize({ cmd = "run" }))
     H.is_nil(R.sanitize({ name = "  " }))
     H.is_nil(R.sanitize("x"))
-    local c = R.sanitize({ name = " go ", cmd = "rm -rf", args = 5, env = { OK = "1", ["bad name"] = "2", N = 3 }, profiler = "dtrace", bin = "x", example = "y" })
+    local c = R.sanitize({
+      name = " go ",
+      cmd = "rm -rf",
+      args = 5,
+      env = { OK = "1", ["bad name"] = "2", N = 3 },
+      profiler = "dtrace",
+      bin = "x",
+      example = "y",
+    })
     H.eq("go", c.name)
     H.eq("run", c.cmd)
     H.eq("", c.args)
@@ -81,10 +89,20 @@ describe("storage", function()
     H.ok(R.save(other, { name = "c" }))
     R.set_last(root, "b")
     local cur = R.load(root)
-    H.eq({ "a", "b" }, vim.tbl_map(function(c) return c.name end, cur.configs))
+    H.eq(
+      { "a", "b" },
+      vim.tbl_map(function(c)
+        return c.name
+      end, cur.configs)
+    )
     H.eq("b", cur.last)
     H.eq({ K = "v" }, cur.configs[1].env)
-    H.eq({ "c" }, vim.tbl_map(function(c) return c.name end, R.load(other).configs))
+    H.eq(
+      { "c" },
+      vim.tbl_map(function(c)
+        return c.name
+      end, R.load(other).configs)
+    )
     -- the file is what a second nvim would read
     local raw = vim.json.decode(table.concat(vim.fn.readfile(R.file()), "\n"))
     H.eq(2, vim.tbl_count(raw))
@@ -99,11 +117,21 @@ describe("storage", function()
     R.set_last(root, "a")
     H.ok(R.save(root, { name = "z", cmd = "bench" }, "a"))
     local cur = R.load(root)
-    H.eq({ "z", "b" }, vim.tbl_map(function(c) return c.name end, cur.configs))
+    H.eq(
+      { "z", "b" },
+      vim.tbl_map(function(c)
+        return c.name
+      end, cur.configs)
+    )
     H.eq("z", cur.last, "last follows a rename")
     H.ok(R.delete(root, "z"))
     H.not_ok(R.delete(root, "z"))
-    H.eq({ "b" }, vim.tbl_map(function(c) return c.name end, R.load(root).configs))
+    H.eq(
+      { "b" },
+      vim.tbl_map(function(c)
+        return c.name
+      end, R.load(root).configs)
+    )
     H.is_nil(R.load(root).last)
   end)
 
@@ -117,12 +145,26 @@ end)
 
 describe("build", function()
   it("a binary with program args, cargo args and the context features", function()
-    local b = R.build({ name = "n", cmd = "run", package = "p", bin = "tool", cargo_args = "--release", args = "--port 80 'a b'", env = { A = "1" } }, { "--features", "x" })
-    H.eq({ "cargo", "run", "-p", "p", "--bin", "tool", "--features", "x", "--release", "--", "--port", "80", "a b" }, b.argv)
+    local b = R.build({
+      name = "n",
+      cmd = "run",
+      package = "p",
+      bin = "tool",
+      cargo_args = "--release",
+      args = "--port 80 'a b'",
+      env = { A = "1" },
+    }, { "--features", "x" })
+    H.eq(
+      { "cargo", "run", "-p", "p", "--bin", "tool", "--features", "x", "--release", "--", "--port", "80", "a b" },
+      b.argv
+    )
     H.eq({ A = "1" }, b.env)
   end)
   it("a feature flag of the configuration replaces the context's", function()
-    local b = R.build({ name = "n", cmd = "test", cargo_args = "--no-default-features --workspace" }, { "--all-features" })
+    local b = R.build(
+      { name = "n", cmd = "test", cargo_args = "--no-default-features --workspace" },
+      { "--all-features" }
+    )
     H.eq({ "cargo", "test", "--no-default-features", "--workspace" }, b.argv)
     b = R.build({ name = "n", cmd = "check", cargo_args = "-F foo" }, { "--all-features" })
     H.eq({ "cargo", "check", "-F", "foo" }, b.argv)
@@ -143,33 +185,50 @@ describe("build", function()
     H.match(e, "program arguments", true)
   end)
   it("profilers: flamegraph argv and samply as an argv of sh with the program args separate", function()
-    local meta = { target_directory = "/t", packages = { { name = "p", targets = { { name = "tool", kind = { "bin" } } } } } }
-    local f = R.build({ name = "n", cmd = "run", package = "p", bin = "tool", args = "--x 1", profiler = "flamegraph" }, { "--features", "z" }, meta)
+    local meta =
+      { target_directory = "/t", packages = { { name = "p", targets = { { name = "tool", kind = { "bin" } } } } } }
+    local f = R.build(
+      { name = "n", cmd = "run", package = "p", bin = "tool", args = "--x 1", profiler = "flamegraph" },
+      { "--features", "z" },
+      meta
+    )
     H.eq("cargo-flamegraph", f.tool)
     H.eq({ "cargo", "flamegraph", "--profile", "profiling" }, vim.list_slice(f.argv, 1, 4))
-    H.has(f.argv, 'profile.profiling.debug=true')
+    H.has(f.argv, "profile.profiling.debug=true")
     H.eq({ "--", "--x", "1" }, vim.list_slice(f.argv, #f.argv - 2))
-    local s = R.build({ name = "n", cmd = "run", package = "p", bin = "tool", args = "a; b", profiler = "samply" }, {}, meta)
+    local s = R.build(
+      { name = "n", cmd = "run", package = "p", bin = "tool", args = "a; b", profiler = "samply" },
+      {},
+      meta
+    )
     H.eq("samply", s.tool)
     H.eq("sh", s.argv[1])
     H.match(s.argv[3], "'cargo' 'build' '--profile' 'profiling'", true)
-    H.match(s.argv[3], "exec samply record \"$@\"", true)
+    H.match(s.argv[3], 'exec samply record "$@"', true)
     H.eq({ "/t/profiling/tool", "a;", "b" }, vim.list_slice(s.argv, 5))
     H.not_ok(s.argv[3]:find("a;", 1, true), "program args are not part of the shell text")
   end)
-  it("perf profiler: build, record into target/xyno-profile, convert; program args stay out of the shell text", function()
-    local meta = { target_directory = "/t", packages = { { name = "p", targets = { { name = "tool", kind = { "bin" } } } } } }
-    local s = R.build({ name = "n", cmd = "run", package = "p", bin = "tool", args = "a; $(id)", profiler = "perf" }, {}, meta)
-    H.eq("perf", s.tool)
-    H.match(s.argv[3], "perf record -F 999 --call-graph dwarf", true)
-    H.match(s.argv[3], "'/t/xyno-profile'", true)
-    H.match(s.argv[3], "perf script -i '/t/xyno-profile'/perf.data > '/t/xyno-profile'/perf.script", true)
-    H.eq({ "/t/profiling/tool", "a;", "$(id)" }, vim.list_slice(s.argv, 5))
-    H.not_ok(s.argv[3]:find("$(id)", 1, true))
-    -- and the shell text parses (sh -n)
-    local r = vim.system({ "sh", "-n", "-c", s.argv[3] }):wait()
-    H.eq(0, r.code, r.stderr)
-  end)
+  it(
+    "perf profiler: build, record into target/xyno-profile, convert; program args stay out of the shell text",
+    function()
+      local meta =
+        { target_directory = "/t", packages = { { name = "p", targets = { { name = "tool", kind = { "bin" } } } } } }
+      local s = R.build(
+        { name = "n", cmd = "run", package = "p", bin = "tool", args = "a; $(id)", profiler = "perf" },
+        {},
+        meta
+      )
+      H.eq("perf", s.tool)
+      H.match(s.argv[3], "perf record -F 999 --call-graph dwarf", true)
+      H.match(s.argv[3], "'/t/xyno-profile'", true)
+      H.match(s.argv[3], "perf script -i '/t/xyno-profile'/perf.data > '/t/xyno-profile'/perf.script", true)
+      H.eq({ "/t/profiling/tool", "a;", "$(id)" }, vim.list_slice(s.argv, 5))
+      H.not_ok(s.argv[3]:find("$(id)", 1, true))
+      -- and the shell text parses (sh -n)
+      local r = vim.system({ "sh", "-n", "-c", s.argv[3] }):wait()
+      H.eq(0, r.code, r.stderr)
+    end
+  )
   it("profilers need a bin run", function()
     local b, e = R.build({ name = "n", cmd = "test", profiler = "samply" }, {}, {})
     H.is_nil(b)
@@ -179,9 +238,25 @@ end)
 
 describe("defaults", function()
   it("one run per bin and example, plus test all", function()
-    local meta = { packages = { { name = "p", targets = { { name = "tool", kind = { "bin" } }, { name = "ex", kind = { "example" } }, { name = "p", kind = { "lib" } } } } } }
+    local meta = {
+      packages = {
+        {
+          name = "p",
+          targets = {
+            { name = "tool", kind = { "bin" } },
+            { name = "ex", kind = { "example" } },
+            { name = "p", kind = { "lib" } },
+          },
+        },
+      },
+    }
     local d = R.defaults(meta)
-    H.eq({ "run tool", "run ex", "test all" }, vim.tbl_map(function(c) return c.name end, d))
+    H.eq(
+      { "run tool", "run ex", "test all" },
+      vim.tbl_map(function(c)
+        return c.name
+      end, d)
+    )
     H.eq("tool", d[1].bin)
     H.is_nil(d[1].package, "single package: no -p")
   end)
@@ -224,9 +299,13 @@ describe(":RustRun", function()
       picked = o
     end
     vim.cmd("RustRun")
-    H.wait_for(function() return picked end, 15000, "picker")
+    H.wait_for(function()
+      return picked
+    end, 15000, "picker")
     Snacks.picker = orig
-    local texts = vim.tbl_map(function(i) return i.text end, picked.items)
+    local texts = vim.tbl_map(function(i)
+      return i.text
+    end, picked.items)
     H.ok(texts[1]:find("run tool", 1, true), vim.inspect(texts))
     H.ok(texts[#texts]:find("new configuration", 1, true))
     -- give the first one an env and arguments, then run it
@@ -236,7 +315,9 @@ describe(":RustRun", function()
     R.save(dir, cfg, cfg.name)
     local before = #terms
     vim.cmd("RustRun run tool")
-    H.wait_for(function() return #terms > before end, 15000, "terminal")
+    H.wait_for(function()
+      return #terms > before
+    end, 15000, "terminal")
     local t = terms[#terms]
     H.eq({ "cargo", "run", "--bin", "tool", "--all-features", "--", "--flag", "two words" }, t.cmd)
     H.eq({ MY_VAR = "x y" }, t.opts.env)
@@ -244,7 +325,9 @@ describe(":RustRun", function()
     -- and :RustRunLast repeats it
     before = #terms
     vim.cmd("RustRunLast")
-    H.wait_for(function() return #terms > before end, 15000, "terminal again")
+    H.wait_for(function()
+      return #terms > before
+    end, 15000, "terminal again")
     H.eq(t.cmd, terms[#terms].cmd)
     restore()
   end)
@@ -254,10 +337,14 @@ describe(":RustRun", function()
     open_all()
     local n = H.capture_notify()
     vim.cmd("RustRunLast")
-    H.wait_for(function() return #n.list > 0 end, 15000, "notification")
+    H.wait_for(function()
+      return #n.list > 0
+    end, 15000, "notification")
     H.match(n.list[1].msg, "nothing was run yet", true)
     vim.cmd("RustRun nope")
-    H.wait_for(function() return #n.list > 1 end, 15000, "notification")
+    H.wait_for(function()
+      return #n.list > 1
+    end, 15000, "notification")
     H.match(n.list[2].msg, "no run configuration", true)
   end)
 
@@ -266,13 +353,17 @@ describe(":RustRun", function()
     local dir = open_all()
     R.save(dir, { name = "prof", cmd = "run", bin = "tool", profiler = "samply" })
     local real = vim.fn.executable
-    vim.fn.executable = function(x) return x == "samply" and 0 or real(x) end
+    vim.fn.executable = function(x)
+      return x == "samply" and 0 or real(x)
+    end
     local n = H.capture_notify()
     local before = #terms
     vim.cmd("RustRun prof")
     local hit = H.wait_for(function()
       for _, x in ipairs(n.list) do
-        if x.msg:find("not installed", 1, true) then return x end
+        if x.msg:find("not installed", 1, true) then
+          return x
+        end
       end
     end, 15000, "install hint")
     vim.fn.executable = real
@@ -301,7 +392,9 @@ describe(":RustRun", function()
       cb(a)
     end
     local got
-    R.prompt("/x", meta, nil, function(c) got = c end)
+    R.prompt("/x", meta, nil, function(c)
+      got = c
+    end)
     vim.ui.select, vim.ui.input = o_sel, o_in
     H.eq("tool", got.bin)
     H.eq("--verbose 'a b'", got.args)
@@ -314,9 +407,14 @@ describe(":RustRun", function()
     H.need_rust()
     local dir = H.tmpdir()
     vim.fn.mkdir(dir .. "/src", "p")
-    vim.fn.writefile({ '[package]', 'name = "echo_rc"', 'version = "0.1.0"', 'edition = "2021"' }, dir .. "/Cargo.toml")
-    vim.fn.writefile({ 'fn main() { println!("ENV={} ARGS={:?}", std::env::var("RC_PROBE").unwrap_or_default(), std::env::args().skip(1).collect::<Vec<_>>()); }' }, dir .. "/src/main.rs")
-    local b = R.build({ name = "e", cmd = "run", bin = "echo_rc", args = "one 'two words' '$HOME'", env = { RC_PROBE = "ok1" } }, {})
+    vim.fn.writefile({ "[package]", 'name = "echo_rc"', 'version = "0.1.0"', 'edition = "2021"' }, dir .. "/Cargo.toml")
+    vim.fn.writefile({
+      'fn main() { println!("ENV={} ARGS={:?}", std::env::var("RC_PROBE").unwrap_or_default(), std::env::args().skip(1).collect::<Vec<_>>()); }',
+    }, dir .. "/src/main.rs")
+    local b = R.build(
+      { name = "e", cmd = "run", bin = "echo_rc", args = "one 'two words' '$HOME'", env = { RC_PROBE = "ok1" } },
+      {}
+    )
     local argv = vim.list_extend({ "cargo" }, vim.list_slice(b.argv, 2))
     table.insert(argv, 2, "--quiet")
     local r = vim.system(argv, { cwd = dir, env = b.env, text = true }):wait(120000)
@@ -328,7 +426,7 @@ describe(":RustRun", function()
     H.need_rust()
     local dir = H.tmpdir()
     vim.fn.mkdir(dir .. "/src", "p")
-    vim.fn.writefile({ '[package]', 'name = "prof_rc"', 'version = "0.1.0"', 'edition = "2021"' }, dir .. "/Cargo.toml")
+    vim.fn.writefile({ "[package]", 'name = "prof_rc"', 'version = "0.1.0"', 'edition = "2021"' }, dir .. "/Cargo.toml")
     vim.fn.writefile({ "fn main() {}" }, dir .. "/src/main.rs")
     local argv = { "cargo", "build", "--profile", "profiling" }
     vim.list_extend(argv, R.PROFILING_FLAGS)

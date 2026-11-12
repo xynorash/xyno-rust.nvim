@@ -48,7 +48,12 @@ local function terminals()
   end)
   stub(Snacks.terminal, "open", function(cmd, opts)
     cap.opened[#cap.opened + 1] = { cmd = cmd, opts = opts }
-    return { buf_valid = function() return true end, close = function() end }
+    return {
+      buf_valid = function()
+        return true
+      end,
+      close = function() end,
+    }
   end)
   return cap
 end
@@ -77,7 +82,10 @@ describe("trust store", function()
     local dir = H.tmpdir()
     trust.trust(dir)
     H.ok(trust.is_trusted(dir))
-    H.not_ok(trust.is_trusted(dir .. "/src/deep"), "trust is per workspace root (exact), only a recursive entry covers what is below")
+    H.not_ok(
+      trust.is_trusted(dir .. "/src/deep"),
+      "trust is per workspace root (exact), only a recursive entry covers what is below"
+    )
     H.eq(1, #trust.list())
     H.eq(trust.normalize(dir), trust.list()[1].root)
     H.eq(true, trust.revoke(dir))
@@ -122,15 +130,21 @@ describe("trust store", function()
 
   it("two nvim instances trusting different roots at once keep both", function()
     local script = H.tmpdir() .. "/child.lua"
-    write(script, ([[
+    write(
+      script,
+      ([[
       vim.opt.rtp:prepend(%q)
       local t = require("xyno_rust.trust")
       for i = 1, 15 do t.trust(os.getenv("TRUST_DIR") .. "/" .. vim.uv.os_getpid() .. "-" .. i) end
-    ]]):format(H.repo))
+    ]]):format(H.repo)
+    )
     local base = H.tmpdir()
     local jobs = {}
     for _ = 1, 4 do
-      jobs[#jobs + 1] = vim.system({ vim.v.progpath, "--headless", "-u", "NONE", "-l", script }, { env = { TRUST_DIR = base, XDG_STATE_HOME = vim.env.XDG_STATE_HOME } })
+      jobs[#jobs + 1] = vim.system(
+        { vim.v.progpath, "--headless", "-u", "NONE", "-l", script },
+        { env = { TRUST_DIR = base, XDG_STATE_HOME = vim.env.XDG_STATE_HOME } }
+      )
     end
     for _, j in ipairs(jobs) do
       j:wait(30000)
@@ -147,37 +161,43 @@ describe("trust follows the content that runs code (re-ask when it changed)", fu
     return dir
   end
 
-  it("a trusted workspace stays trusted while its manifests, build scripts, cargo config and toolchain are unchanged", function()
-    local dir = ws()
-    trust.trust(dir)
-    H.ok(trust.is_trusted(dir))
-    write(dir .. "/src/lib.rs", "pub fn g() {}\n") -- ordinary source edits never ask again
-    write(dir .. "/Cargo.lock", "# lock\n")
-    H.ok(trust.is_trusted(dir))
-    H.is_nil(trust.drift(dir))
-  end)
-
-  it("a changed or new Cargo.toml / build.rs / .cargo/config.toml / rust-toolchain.toml makes it untrusted again and names the file", function()
-    for _, case in ipairs({
-      { "Cargo.toml", '[package]\nname = "d"\nversion = "0.1.0"\nedition = "2021"\nbuild = "evil.rs"\n' },
-      { "build.rs", "fn main() {}\n" },
-      { ".cargo/config.toml", '[build]\nrustc-wrapper = "/tmp/x"\n' },
-      { ".cargo/config", '[build]\nrustc = "/tmp/x"\n' },
-      { "rust-toolchain.toml", '[toolchain]\nchannel = "nightly"\n' },
-      { "rust-toolchain", "nightly\n" },
-      { "member/Cargo.toml", '[package]\nname = "m"\nversion = "0.1.0"\n' },
-      { "member/build.rs", "fn main() {}\n" },
-    }) do
-      trust.revoke_all()
+  it(
+    "a trusted workspace stays trusted while its manifests, build scripts, cargo config and toolchain are unchanged",
+    function()
       local dir = ws()
       trust.trust(dir)
-      H.ok(trust.is_trusted(dir), case[1] .. " before")
-      write(dir .. "/" .. case[1], case[2])
-      H.not_ok(trust.is_trusted(dir), case[1] .. " changed: untrusted")
-      local d = trust.drift(dir)
-      H.ok(d and vim.tbl_contains(d, case[1]), case[1] .. " is named in the drift: " .. vim.inspect(d))
+      H.ok(trust.is_trusted(dir))
+      write(dir .. "/src/lib.rs", "pub fn g() {}\n") -- ordinary source edits never ask again
+      write(dir .. "/Cargo.lock", "# lock\n")
+      H.ok(trust.is_trusted(dir))
+      H.is_nil(trust.drift(dir))
     end
-  end)
+  )
+
+  it(
+    "a changed or new Cargo.toml / build.rs / .cargo/config.toml / rust-toolchain.toml makes it untrusted again and names the file",
+    function()
+      for _, case in ipairs({
+        { "Cargo.toml", '[package]\nname = "d"\nversion = "0.1.0"\nedition = "2021"\nbuild = "evil.rs"\n' },
+        { "build.rs", "fn main() {}\n" },
+        { ".cargo/config.toml", '[build]\nrustc-wrapper = "/tmp/x"\n' },
+        { ".cargo/config", '[build]\nrustc = "/tmp/x"\n' },
+        { "rust-toolchain.toml", '[toolchain]\nchannel = "nightly"\n' },
+        { "rust-toolchain", "nightly\n" },
+        { "member/Cargo.toml", '[package]\nname = "m"\nversion = "0.1.0"\n' },
+        { "member/build.rs", "fn main() {}\n" },
+      }) do
+        trust.revoke_all()
+        local dir = ws()
+        trust.trust(dir)
+        H.ok(trust.is_trusted(dir), case[1] .. " before")
+        write(dir .. "/" .. case[1], case[2])
+        H.not_ok(trust.is_trusted(dir), case[1] .. " changed: untrusted")
+        local d = trust.drift(dir)
+        H.ok(d and vim.tbl_contains(d, case[1]), case[1] .. " is named in the drift: " .. vim.inspect(d))
+      end
+    end
+  )
 
   it("a removed file counts as a change", function()
     local dir = ws()
@@ -220,19 +240,22 @@ describe("trust follows the content that runs code (re-ask when it changed)", fu
     H.not_ok(trust.is_trusted(dir))
   end)
 
-  it("rehash(root, saved_file) accepts the saved file only: a pulled build.rs next to it keeps the workspace untrusted", function()
-    local dir = ws()
-    trust.trust(dir)
-    write(dir .. "/Cargo.toml", '[package]\nname = "d"\nversion = "0.3.0"\nedition = "2021"\n')
-    H.eq(true, trust.rehash(dir, dir .. "/Cargo.toml"), "only the saved file differs")
-    H.ok(trust.is_trusted(dir))
-    write(dir .. "/Cargo.toml", '[package]\nname = "d"\nversion = "0.4.0"\nedition = "2021"\n')
-    write(dir .. "/build.rs", "fn main() { /* pulled */ }\n")
-    H.eq(false, trust.rehash(dir, dir .. "/Cargo.toml"), "build.rs changed as well")
-    H.not_ok(trust.is_trusted(dir))
-    local d = trust.drift(dir)
-    H.ok(vim.tbl_contains(d, "build.rs"))
-  end)
+  it(
+    "rehash(root, saved_file) accepts the saved file only: a pulled build.rs next to it keeps the workspace untrusted",
+    function()
+      local dir = ws()
+      trust.trust(dir)
+      write(dir .. "/Cargo.toml", '[package]\nname = "d"\nversion = "0.3.0"\nedition = "2021"\n')
+      H.eq(true, trust.rehash(dir, dir .. "/Cargo.toml"), "only the saved file differs")
+      H.ok(trust.is_trusted(dir))
+      write(dir .. "/Cargo.toml", '[package]\nname = "d"\nversion = "0.4.0"\nedition = "2021"\n')
+      write(dir .. "/build.rs", "fn main() { /* pulled */ }\n")
+      H.eq(false, trust.rehash(dir, dir .. "/Cargo.toml"), "build.rs changed as well")
+      H.not_ok(trust.is_trusted(dir))
+      local d = trust.drift(dir)
+      H.ok(vim.tbl_contains(d, "build.rs"))
+    end
+  )
 
   it("an entry written before hashes existed is adopted silently, not re-asked", function()
     local dir = ws()
@@ -469,12 +492,20 @@ describe("reading cargo metadata of an unknown workspace executes nothing of it"
     local canary = dir .. "-canary"
     vim.fn.mkdir(canary, "p")
     local script = canary .. "/run.sh"
-    write(script, ("#!/bin/sh\necho \"$0 $*\" >> %s/executed\ncase \"$1\" in -*) exec rustc \"$@\" ;; *) exec \"$@\" ;; esac\n"):format(canary))
+    write(
+      script,
+      ('#!/bin/sh\necho "$0 $*" >> %s/executed\ncase "$1" in -*) exec rustc "$@" ;; *) exec "$@" ;; esac\n'):format(
+        canary
+      )
+    )
     vim.uv.fs_chmod(script, 493)
     write(dir .. "/Cargo.toml", '[package]\nname = "trap"\nversion = "0.1.0"\nedition = "2021"\nbuild = "build.rs"\n')
     write(dir .. "/src/main.rs", "fn main() {}\n")
     write(dir .. "/build.rs", ('fn main() { std::fs::write("%s/build-rs-ran", "x").unwrap(); }\n'):format(canary))
-    write(dir .. "/.cargo/config.toml", ('[build]\nrustc = "%s"\nrustc-wrapper = "%s"\nrustc-workspace-wrapper = "%s"\n'):format(script, script, script))
+    write(
+      dir .. "/.cargo/config.toml",
+      ('[build]\nrustc = "%s"\nrustc-wrapper = "%s"\nrustc-workspace-wrapper = "%s"\n'):format(script, script, script)
+    )
     return dir, canary
   end
 
@@ -489,16 +520,19 @@ describe("reading cargo metadata of an unknown workspace executes nothing of it"
     H.is_nil(vim.uv.fs_stat(canary .. "/executed"), "a configured rustc/wrapper ran")
   end)
 
-  it("crate_meta.metadata (the resolving `cargo metadata` the other xyno plugins use) is neutralised in an untrusted workspace", function()
-    local dir, canary = booby_trapped()
-    local cm = require("xyno_rust.crate_meta")
-    cm.invalidate()
-    local meta, err = cm.metadata(dir)
-    H.ok(meta, tostring(err))
-    vim.wait(300)
-    H.is_nil(vim.uv.fs_stat(canary .. "/build-rs-ran"), "build.rs ran")
-    H.is_nil(vim.uv.fs_stat(canary .. "/executed"), "a configured rustc/wrapper ran")
-  end)
+  it(
+    "crate_meta.metadata (the resolving `cargo metadata` the other xyno plugins use) is neutralised in an untrusted workspace",
+    function()
+      local dir, canary = booby_trapped()
+      local cm = require("xyno_rust.crate_meta")
+      cm.invalidate()
+      local meta, err = cm.metadata(dir)
+      H.ok(meta, tostring(err))
+      vim.wait(300)
+      H.is_nil(vim.uv.fs_stat(canary .. "/build-rs-ran"), "build.rs ran")
+      H.is_nil(vim.uv.fs_stat(canary .. "/executed"), "a configured rustc/wrapper ran")
+    end
+  )
 
   it("control: the same call in a trusted workspace does let cargo use the configured rustc wrapper", function()
     local dir, canary = booby_trapped()
@@ -507,12 +541,18 @@ describe("reading cargo metadata of an unknown workspace executes nothing of it"
     cm.invalidate()
     local meta, err = cm.metadata(dir)
     H.ok(meta, tostring(err))
-    H.ok(vim.uv.fs_stat(canary .. "/executed"), "trusted workspaces behave as before (the wrapper ran), so the test above proves the guard")
+    H.ok(
+      vim.uv.fs_stat(canary .. "/executed"),
+      "trusted workspaces behave as before (the wrapper ran), so the test above proves the guard"
+    )
   end)
 
   it("an untrusted workspace is not retried online when the offline run cannot resolve", function()
     local dir = H.tmpdir()
-    write(dir .. "/Cargo.toml", '[package]\nname = "x"\nversion = "0.1.0"\nedition = "2021"\n[dependencies]\nnot-in-any-cache-xyz = "1"\n')
+    write(
+      dir .. "/Cargo.toml",
+      '[package]\nname = "x"\nversion = "0.1.0"\nedition = "2021"\n[dependencies]\nnot-in-any-cache-xyz = "1"\n'
+    )
     write(dir .. "/src/main.rs", "fn main() {}\n")
     local cm = require("xyno_rust.crate_meta")
     local argvs = {}
@@ -533,7 +573,10 @@ describe("reading cargo metadata of an unknown workspace executes nothing of it"
   it("and it works as a control: a real build of the same workspace does trigger the canary", function()
     local dir, canary = booby_trapped()
     local r = vim.system({ "cargo", "check", "--offline" }, { cwd = dir, text = true }):wait(120000)
-    H.ok(vim.uv.fs_stat(canary .. "/executed") or vim.uv.fs_stat(canary .. "/build-rs-ran"), "the trap does not work, so the test above proves nothing: " .. (r.stderr or ""))
+    H.ok(
+      vim.uv.fs_stat(canary .. "/executed") or vim.uv.fs_stat(canary .. "/build-rs-ran"),
+      "the trap does not work, so the test above proves nothing: " .. (r.stderr or "")
+    )
   end)
 end)
 

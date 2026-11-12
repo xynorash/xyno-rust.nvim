@@ -12,7 +12,13 @@ end
 local list = {}
 for m = 1, members do
   list[#list + 1] = ('"crates/m%d"'):format(m)
-  write(("%s/crates/m%d/Cargo.toml"):format(dir, m), ('[package]\nname = "m%d"\nversion = "0.1.0"\nedition = "2021"\n\n[features]\ndefault = []\nf%d = []\n'):format(m, m))
+  write(
+    ("%s/crates/m%d/Cargo.toml"):format(dir, m),
+    ('[package]\nname = "m%d"\nversion = "0.1.0"\nedition = "2021"\n\n[features]\ndefault = []\nf%d = []\n'):format(
+      m,
+      m
+    )
+  )
   local mods = {}
   for i = 1, files do
     mods[#mods + 1] = ("pub mod r%d;"):format(i)
@@ -28,5 +34,5 @@ for m = 1, members do
   end
   write(("%s/crates/m%d/src/lib.rs"):format(dir, m), table.concat(mods, "\n") .. "\n")
 end
-write(dir .. "/Cargo.toml", "[workspace]\nresolver = \"2\"\nmembers = [" .. table.concat(list, ", ") .. "]\n")
+write(dir .. "/Cargo.toml", '[workspace]\nresolver = "2"\nmembers = [' .. table.concat(list, ", ") .. "]\n")
 print(("generated %d members x %d files = %d .rs files in %s"):format(members, files, members * files + members, dir))

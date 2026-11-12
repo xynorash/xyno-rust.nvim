@@ -87,7 +87,15 @@ function M.init_call(root, meta)
       for name, typ in vim.fs.dir(d, { depth = 4 }) do
         if typ == "file" and name:match("%.rs$") then
           local t = read(d .. "/" .. name)
-          if t and (t:find("console_subscriber::init", 1, true) or t:find("console_subscriber::ConsoleLayer", 1, true) or t:find("console_subscriber::Builder", 1, true) or t:find("console_subscriber::spawn", 1, true)) then
+          if
+            t
+            and (
+              t:find("console_subscriber::init", 1, true)
+              or t:find("console_subscriber::ConsoleLayer", 1, true)
+              or t:find("console_subscriber::Builder", 1, true)
+              or t:find("console_subscriber::spawn", 1, true)
+            )
+          then
             return true, d .. "/" .. name
           end
         end
@@ -106,12 +114,12 @@ function M.checks(s)
   out[#out + 1] = {
     ok = has_tokio,
     text = "the project depends on tokio",
-    fix = "tokio = { version = \"1\", features = [\"full\", \"tracing\"] }   # [dependencies]",
+    fix = 'tokio = { version = "1", features = ["full", "tracing"] }   # [dependencies]',
   }
   out[#out + 1] = {
     ok = depends(s.meta, "console-subscriber"),
     text = "the project depends on console-subscriber (the program side of tokio-console)",
-    fix = "console-subscriber = \"0.4\"   # [dependencies], dev-only is fine: cargo add --dev console-subscriber",
+    fix = 'console-subscriber = "0.4"   # [dependencies], dev-only is fine: cargo add --dev console-subscriber',
   }
   out[#out + 1] = {
     ok = s.init,
@@ -144,7 +152,8 @@ function M.report(checks, attrs)
   if #attrs > 0 then
     lines[#lines + 1] = ("This buffer has %d tokio entry point(s)."):format(#attrs)
   end
-  lines[#lines + 1] = "Debugger side: async frames are renamed (…::{{closure}} shows its function), but tasks are not threads: breakpoints"
+  lines[#lines + 1] =
+    "Debugger side: async frames are renamed (…::{{closure}} shows its function), but tasks are not threads: breakpoints"
   lines[#lines + 1] = "inside async fns work, stepping across .await continues on whichever worker polls next."
   return table.concat(lines, "\n"), all
 end
@@ -232,7 +241,13 @@ function M.setup(opts)
   end
   vim.api.nvim_create_user_command("TokioConsole", function(a)
     M.command(a.args)
-  end, { nargs = "?", complete = function() return { "check" } end, desc = "tokio-console: project check, then launch" })
+  end, {
+    nargs = "?",
+    complete = function()
+      return { "check" }
+    end,
+    desc = "tokio-console: project check, then launch",
+  })
 end
 
 return M

@@ -148,7 +148,10 @@ function M.bacon(bufnr)
   -- "ok" meant "finished", also with errors on screen: say how many
   local ERROR = vim.diagnostic.severity.ERROR
   local has_ns, ns = pcall(vim.lsp.diagnostic.get_namespace, c.id)
-  local errors = has_ns and vim.api.nvim_buf_is_valid(buf) and vim.diagnostic.count(buf, { namespace = ns, severity = ERROR })[ERROR] or 0
+  local errors = has_ns
+      and vim.api.nvim_buf_is_valid(buf)
+      and vim.diagnostic.count(buf, { namespace = ns, severity = ERROR })[ERROR]
+    or 0
   if errors > 0 then
     return ("clippy %dE"):format(errors)
   end

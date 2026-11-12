@@ -15,7 +15,7 @@ end)
 
 local function crate(toml)
   local dir = H.tmpdir()
-  vim.fn.writefile({ '[package]', 'name = "shr"', 'version = "0.1.0"', 'edition = "2021"' }, dir .. "/Cargo.toml")
+  vim.fn.writefile({ "[package]", 'name = "shr"', 'version = "0.1.0"', 'edition = "2021"' }, dir .. "/Cargo.toml")
   vim.fn.mkdir(dir .. "/src", "p")
   vim.fn.writefile({ "fn main() {}" }, dir .. "/src/main.rs")
   vim.fn.mkdir(dir .. "/.xynovim", "p")
@@ -49,7 +49,11 @@ args = "$(id)"
 
 describe("toml_mini", function()
   it("reads tables, arrays of tables, inline tables, arrays, comments", function()
-    local d = assert(T.parse('# c\n[[a]]\nx = "1" # t\ny = [1,\n 2, # k\n]\nz = { k = true, "q-r" = \'s\' }\n[a.sub]\nn = -3\n[[a]]\nx = "2"\n'))
+    local d = assert(
+      T.parse(
+        '# c\n[[a]]\nx = "1" # t\ny = [1,\n 2, # k\n]\nz = { k = true, "q-r" = \'s\' }\n[a.sub]\nn = -3\n[[a]]\nx = "2"\n'
+      )
+    )
     H.eq(2, #d.a)
     H.eq({ 1, 2 }, d.a[1].y)
     H.eq({ k = true, ["q-r"] = "s" }, d.a[1].z)
@@ -128,22 +132,34 @@ describe("shared run configurations", function()
     local dir = crate(nil)
     H.eq(false, R.load_shared(dir).exists)
     R.save(dir, { name = "mine", cmd = "check" })
-    H.eq({ "mine" }, vim.tbl_map(function(c) return c.name end, R.load_all(dir).configs))
+    H.eq(
+      { "mine" },
+      vim.tbl_map(function(c)
+        return c.name
+      end, R.load_all(dir).configs)
+    )
   end)
 
   it("share writes a personal configuration to the file and keeps the other entries; to_toml round-trips", function()
     local dir = crate(FILE)
     trust.trust(dir)
-    R.save(dir, { name = "my 'job'", cmd = "run", bin = "x", args = [[--a "b c"]], env = { K = 'v"1' }, profiler = "flamegraph" })
+    R.save(
+      dir,
+      { name = "my 'job'", cmd = "run", bin = "x", args = [[--a "b c"]], env = { K = 'v"1' }, profiler = "flamegraph" }
+    )
     H.ok(R.share(dir, "my 'job'"))
     local all = R.load_all(dir).configs
-    local names = vim.tbl_map(function(c) return c.name end, all)
+    local names = vim.tbl_map(function(c)
+      return c.name
+    end, all)
     H.eq(4, #names, vim.inspect(names)) -- the personal one wins over its shared copy: still 4 distinct names
     local sh = R.load_shared(dir)
     H.eq(4, sh.count)
     local copy
     for _, c in ipairs(sh.configs) do
-      if c.name == "my 'job'" then copy = c end
+      if c.name == "my 'job'" then
+        copy = c
+      end
     end
     H.eq({ K = 'v"1' }, copy.env)
     H.eq("flamegraph", copy.profiler)
@@ -171,12 +187,16 @@ describe("shared run configurations", function()
     vim.cmd("edit " .. vim.fn.fnameescape(dir .. "/src/main.rs"))
     local n = H.capture_notify()
     vim.cmd("RustRun unit")
-    H.wait_for(function() return #n.list > 0 end, 15000, "notification")
+    H.wait_for(function()
+      return #n.list > 0
+    end, 15000, "notification")
     H.match(n.list[1].msg, "no run configuration", true)
     H.eq(0, #terms)
     trust.trust(dir)
     vim.cmd("RustRun unit")
-    H.wait_for(function() return #terms > 0 end, 15000, "terminal")
+    H.wait_for(function()
+      return #terms > 0
+    end, 15000, "terminal")
     H.eq({ "cargo", "test", "--all-features", "--", "--nocapture" }, terms[1].cmd)
   end)
 end)

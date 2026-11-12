@@ -8,7 +8,13 @@ local T = require("xyno_rust.tokio")
 local function crate(deps, extra)
   local dir = H.tmpdir()
   vim.fn.mkdir(dir .. "/src", "p")
-  vim.fn.writefile(vim.list_extend({ '[package]', 'name = "tk"', 'version = "0.1.0"', 'edition = "2021"', "[dependencies]" }, deps or {}), dir .. "/Cargo.toml")
+  vim.fn.writefile(
+    vim.list_extend(
+      { "[package]", 'name = "tk"', 'version = "0.1.0"', 'edition = "2021"', "[dependencies]" },
+      deps or {}
+    ),
+    dir .. "/Cargo.toml"
+  )
   vim.fn.writefile({ "#[tokio::main]", "async fn main() {}" }, dir .. "/src/main.rs")
   for p, text in pairs(extra or {}) do
     vim.fn.mkdir(vim.fs.dirname(dir .. "/" .. p), "p")
@@ -19,7 +25,14 @@ end
 
 describe("detect", function()
   it("finds tokio::main and tokio::test, with arguments, not comments or other runtimes", function()
-    local got = T.detect({ "// #[tokio::main]", "#[tokio::main(flavor = \"multi_thread\")]", "fn a(){}", "  #[tokio::test]", "#[async_std::main]", "#[test]" })
+    local got = T.detect({
+      "// #[tokio::main]",
+      '#[tokio::main(flavor = "multi_thread")]',
+      "fn a(){}",
+      "  #[tokio::test]",
+      "#[async_std::main]",
+      "#[test]",
+    })
     H.eq({ { line = 2, kind = "main" }, { line = 4, kind = "test" } }, got)
   end)
 end)
@@ -28,7 +41,12 @@ describe("checks", function()
   local meta = { packages = { { name = "p", dependencies = { { name = "tokio" } } } } }
   it("lists what is missing with the line to add", function()
     local c = T.checks({ meta = meta, unstable = false, init = false, exe = false, attrs = {} })
-    H.eq({ true, false, false, false, false }, vim.tbl_map(function(x) return x.ok end, c))
+    H.eq(
+      { true, false, false, false, false },
+      vim.tbl_map(function(x)
+        return x.ok
+      end, c)
+    )
     local text, all = T.report(c, { { line = 1, kind = "main" } })
     H.eq(false, all)
     H.match(text, "console-subscriber", true)
@@ -65,7 +83,9 @@ describe(":TokioConsole", function()
     vim.cmd("edit " .. vim.fn.fnameescape(d .. "/src/main.rs"))
     local n = H.capture_notify()
     vim.cmd("TokioConsole")
-    H.wait_for(function() return #n.list > 0 end, 30000, "report")
+    H.wait_for(function()
+      return #n.list > 0
+    end, 30000, "report")
     H.match(n.list[1].msg, "[ ] the project depends on console-subscriber", true)
     H.match(n.list[1].msg, "[x] the project depends on tokio", true)
     H.eq(0, #terms)
@@ -86,7 +106,9 @@ describe(":TokioConsole", function()
     vim.cmd("cd " .. vim.fn.fnameescape(d))
     vim.cmd("edit " .. vim.fn.fnameescape(d .. "/src/main.rs"))
     vim.cmd("TokioConsole http://127.0.0.1:6670")
-    H.wait_for(function() return #terms > 0 end, 30000, "terminal")
+    H.wait_for(function()
+      return #terms > 0
+    end, 30000, "terminal")
     vim.env.PATH = path
     H.eq({ "tokio-console", "http://127.0.0.1:6670" }, terms[#terms].cmd)
   end)

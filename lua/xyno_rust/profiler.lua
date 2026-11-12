@@ -242,14 +242,23 @@ function M.render(profile, opts)
     lines[#lines + 1] = text
     meta[#lines] = m or {}
   end
-  add(("Profile: %s   %d samples   (%s)"):format(opts.title or "?", profile.samples, profile.kind == "perf" and "perf script" or "collapsed stacks"))
+  add(
+    ("Profile: %s   %d samples   (%s)"):format(
+      opts.title or "?",
+      profile.samples,
+      profile.kind == "perf" and "perf script" or "collapsed stacks"
+    )
+  )
   add("<CR> fold / jump to source   o jump   E expand all   C collapse   t toggle hot list   q close")
   add("")
   if opts.show_hot ~= false then
     add("Hot functions (self time)", { kind = "head" })
     add(("%7s %7s  %s"):format("self", "total", "function"), { kind = "head" })
     for _, f in ipairs(M.hot(profile, opts.top or 25)) do
-      add(("%6.1f%% %6.1f%%  %s"):format(pct(f.self, total), pct(f.total, total), f.name), { kind = "hot", name = f.name, self = f.self })
+      add(
+        ("%6.1f%% %6.1f%%  %s"):format(pct(f.self, total), pct(f.total, total), f.name),
+        { kind = "hot", name = f.name, self = f.self }
+      )
     end
     add("")
   end
@@ -257,7 +266,11 @@ function M.render(profile, opts)
   local function walk(node, indent)
     for _, c in ipairs(sorted_children(node)) do
       local mark = next(c.children) and (c.open and "▾ " or "▸ ") or "  "
-      add(("%6.1f%% %s%s%s"):format(pct(c.total, total), indent, mark, c.name) .. (c.self > 0 and (" (self %.1f%%)"):format(pct(c.self, total)) or ""), { kind = "node", name = c.name, node = c, self = c.self })
+      add(
+        ("%6.1f%% %s%s%s"):format(pct(c.total, total), indent, mark, c.name)
+          .. (c.self > 0 and (" (self %.1f%%)"):format(pct(c.self, total)) or ""),
+        { kind = "node", name = c.name, node = c, self = c.self }
+      )
       if c.open then
         walk(c, indent .. "  ")
       end
@@ -326,7 +339,10 @@ function M.jump(name)
         end
       end
       if #hits == 0 then
-        return vim.notify(("xyno-rust: %q not found in the workspace%s"):format(sym, err and (" (" .. err .. ")") or ""), vim.log.levels.INFO)
+        return vim.notify(
+          ("xyno-rust: %q not found in the workspace%s"):format(sym, err and (" (" .. err .. ")") or ""),
+          vim.log.levels.INFO
+        )
       end
       if container then
         local pref = vim.tbl_filter(function(s)
@@ -355,7 +371,11 @@ function M.jump(name)
       vim.ui.select(hits, {
         prompt = ("%s: %d matches"):format(sym, #hits),
         format_item = function(s)
-          return ("%s  %s:%d"):format(s.containerName or "", vim.fn.fnamemodify(vim.uri_to_fname(s.location.uri), ":~:."), s.location.range.start.line + 1)
+          return ("%s  %s:%d"):format(
+            s.containerName or "",
+            vim.fn.fnamemodify(vim.uri_to_fname(s.location.uri), ":~:."),
+            s.location.range.start.line + 1
+          )
         end,
       }, function(s)
         if s then
@@ -377,7 +397,13 @@ local function paint(buf, lines, meta)
       vim.api.nvim_buf_set_extmark(buf, ns, i - 1, 0, { line_hl_group = "Title" })
     elseif m.kind == "hot" or m.kind == "node" then
       local p = tonumber(lines[i]:match("^%s*([%d%.]+)%%")) or 0
-      vim.api.nvim_buf_set_extmark(buf, ns, i - 1, 0, { end_col = 7, hl_group = p >= 25 and "DiagnosticError" or p >= 10 and "DiagnosticWarn" or "Comment" })
+      vim.api.nvim_buf_set_extmark(
+        buf,
+        ns,
+        i - 1,
+        0,
+        { end_col = 7, hl_group = p >= 25 and "DiagnosticError" or p >= 10 and "DiagnosticWarn" or "Comment" }
+      )
     end
   end
   vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, { line_hl_group = "Comment" })
@@ -418,7 +444,14 @@ function M.show(profile, title)
   end
   redraw()
   M._views = M._views or {}
-  M._views[buf] = { profile = profile, redraw = redraw, state = state, meta = function() return meta end }
+  M._views[buf] = {
+    profile = profile,
+    redraw = redraw,
+    state = state,
+    meta = function()
+      return meta
+    end,
+  }
   local function at()
     return meta[vim.api.nvim_win_get_cursor(win)[1]] or {}
   end
@@ -490,7 +523,9 @@ function M.open_file(path, cb)
   local function from_text(text)
     local kind = M.detect(text)
     if not kind then
-      local msg = ("%s is neither perf script output nor collapsed stacks (samply JSON is not read: use `samply load`)"):format(title)
+      local msg = ("%s is neither perf script output nor collapsed stacks (samply JSON is not read: use `samply load`)"):format(
+        title
+      )
       if cb then
         return cb(nil, msg)
       end
@@ -574,7 +609,11 @@ function M.find(root)
             break
           end
         end
-      elseif typ == "directory" and depth < 2 and (name == "target" or name == "xyno-profile" or name == "profile" or name == "profiles") then
+      elseif
+        typ == "directory"
+        and depth < 2
+        and (name == "target" or name == "xyno-profile" or name == "profile" or name == "profiles")
+      then
         scan(p, depth + 1)
       end
     end
@@ -599,7 +638,7 @@ function M.command(args)
       return vim.notify(
         "xyno-rust: no profile found under "
           .. root
-          .. " (perf.data, perf.script, *.folded, *.collapsed; make one with a run configuration whose profiler is \"perf\", or :RustProfile <file>)",
+          .. ' (perf.data, perf.script, *.folded, *.collapsed; make one with a run configuration whose profiler is "perf", or :RustProfile <file>)',
         vim.log.levels.INFO
       )
     end
@@ -609,7 +648,11 @@ function M.command(args)
     vim.ui.select(found, {
       prompt = "Profile",
       format_item = function(f)
-        return ("%s  (%s, %d KB)"):format(vim.fn.fnamemodify(f.path, ":~:."), os.date("%Y-%m-%d %H:%M", f.mtime), f.size / 1024)
+        return ("%s  (%s, %d KB)"):format(
+          vim.fn.fnamemodify(f.path, ":~:."),
+          os.date("%Y-%m-%d %H:%M", f.mtime),
+          f.size / 1024
+        )
       end,
     }, function(f)
       if f then

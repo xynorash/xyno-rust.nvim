@@ -32,7 +32,15 @@ describe("api_version", function()
     local calls = {
       ["xyno_rust.rust_context"] = { "root", "canon", "get", "cargo_flags" },
       ["xyno_rust.fsutil"] = { "rename", "slash" },
-      ["xyno_rust.crate_meta"] = { "metadata", "metadata_async", "root", "exec", "member_of", "dependencies", "registry_dir" },
+      ["xyno_rust.crate_meta"] = {
+        "metadata",
+        "metadata_async",
+        "root",
+        "exec",
+        "member_of",
+        "dependencies",
+        "registry_dir",
+      },
       ["xyno_rust.code_actions"] = { "clients" },
       ["xyno_rust.rust_restart"] = { "manifest_saved", "on_exit", "server_pids", "kill_survivors" },
       ["xyno_rust.deps"] = { "snacks" },
@@ -63,7 +71,13 @@ describe(":checkhealth xyno-rust", function()
     vim.cmd.cd(vim.fn.fnameescape(dir))
     vim.cmd("checkhealth xyno-rust")
     local text = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
-    for _, section in ipairs({ "xyno-rust: plugin", "xyno-rust: tools", "xyno-rust: state", "xyno-rust: workspace trust", "xyno-rust: current workspace" }) do
+    for _, section in ipairs({
+      "xyno-rust: plugin",
+      "xyno-rust: tools",
+      "xyno-rust: state",
+      "xyno-rust: workspace trust",
+      "xyno-rust: current workspace",
+    }) do
       H.match(text, section, true)
     end
     H.match(text, "api_version " .. x.api_version, true)

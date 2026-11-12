@@ -18,7 +18,10 @@ local function server()
         cb(nil, { capabilities = { codeLensProvider = { resolveProvider = false } } })
       elseif method == "textDocument/codeLens" then
         local function lens(title, cmd, char)
-          return { range = { start = { line = 2, character = char }, ["end"] = { line = 2, character = char + 2 } }, command = { title = title, command = cmd } }
+          return {
+            range = { start = { line = 2, character = char }, ["end"] = { line = 2, character = char + 2 } },
+            command = { title = title, command = cmd },
+          }
         end
         cb(nil, { lens("▶︎ Run", "xyno.test.run", 0), lens("Debug", "xyno.test.debug", 0) })
       elseif method == "shutdown" then
@@ -29,8 +32,12 @@ local function server()
       return true, 1
     end
     function srv.notify() end
-    function srv.is_closing() return closing end
-    function srv.terminate() closing = true end
+    function srv.is_closing()
+      return closing
+    end
+    function srv.terminate()
+      closing = true
+    end
     return srv
   end
 end

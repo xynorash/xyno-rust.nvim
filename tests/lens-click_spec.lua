@@ -5,7 +5,10 @@ local H = require("xyno_rust_test.helpers")
 local L = require("xyno_rust.lens_click")
 
 local function e(title, char, line)
-  return { client_id = 1, lens = { range = { start = { line = line or 3, character = char } }, command = { title = title } } }
+  return {
+    client_id = 1,
+    lens = { range = { start = { line = line or 3, character = char } }, command = { title = title } },
+  }
 end
 
 describe("spans / hit", function()
@@ -21,7 +24,12 @@ describe("spans / hit", function()
     local early = e("A", 5)
     local unresolved = { client_id = 1, lens = { range = { start = { line = 3, character = 0 } } } }
     local sp = L.spans({ late, unresolved, early }, 3, 5)
-    H.eq({ "A", "B" }, vim.tbl_map(function(s) return s.lens.command.title end, sp))
+    H.eq(
+      { "A", "B" },
+      vim.tbl_map(function(s)
+        return s.lens.command.title
+      end, sp)
+    )
   end)
   it("the separator and the indentation are not hits", function()
     local sp = L.spans({ e("Run", 2), e("Debug", 2) }, 3, 2)
@@ -56,16 +64,35 @@ describe("a real click in a terminal", function()
     local dir = H.tmpdir()
     vim.fn.writefile({ "// one", "", "fn main() {", "    println!();", "}" }, dir .. "/main.rs")
     local repo = H.repo
-    local r = tmux("new-session", "-d", "-x", "80", "-y", "24", "-e", "LC_REPO=" .. repo, "-e", "LC_OUT=" .. dir, "-e", "LC_FILE=" .. dir .. "/main.rs",
-      "nvim --clean -n -c 'luafile " .. repo .. "/tests/fixtures/lens_child.lua'")
+    local r = tmux(
+      "new-session",
+      "-d",
+      "-x",
+      "80",
+      "-y",
+      "24",
+      "-e",
+      "LC_REPO=" .. repo,
+      "-e",
+      "LC_OUT=" .. dir,
+      "-e",
+      "LC_FILE=" .. dir .. "/main.rs",
+      "nvim --clean -n -c 'luafile " .. repo .. "/tests/fixtures/lens_child.lua'"
+    )
     H.eq(0, r.code, r.stderr)
     -- wait for the lens to be drawn
-    H.wait_for(function() return screen():find("Debug", 1, true) end, 15000, "the lens line on screen")
+    H.wait_for(function()
+      return screen():find("Debug", 1, true)
+    end, 15000, "the lens line on screen")
     local lines = vim.split(screen(), "\n", { plain = true })
     local lens_row, code_row
     for i, l in ipairs(lines) do
-      if l:find("Debug", 1, true) then lens_row = i end
-      if l:find("fn main", 1, true) then code_row = i end
+      if l:find("Debug", 1, true) then
+        lens_row = i
+      end
+      if l:find("fn main", 1, true) then
+        code_row = i
+      end
     end
     H.ok(lens_row and code_row and lens_row == code_row - 1, "lens line above the code line: " .. screen())
     local text = lines[lens_row]
@@ -84,9 +111,13 @@ describe("a real click in a terminal", function()
     vim.wait(500)
     H.is_nil(vim.uv.fs_stat(dir .. "/run"))
     click(col_of("Run") + 1, lens_row)
-    H.wait_for(function() return vim.uv.fs_stat(dir .. "/run") end, 8000, "Run command executed")
+    H.wait_for(function()
+      return vim.uv.fs_stat(dir .. "/run")
+    end, 8000, "Run command executed")
     H.is_nil(vim.uv.fs_stat(dir .. "/debug"))
     click(col_of("Debug") + 1, lens_row)
-    H.wait_for(function() return vim.uv.fs_stat(dir .. "/debug") end, 8000, "Debug command executed")
+    H.wait_for(function()
+      return vim.uv.fs_stat(dir .. "/debug")
+    end, 8000, "Debug command executed")
   end)
 end)

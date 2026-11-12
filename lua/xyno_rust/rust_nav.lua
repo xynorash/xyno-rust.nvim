@@ -56,7 +56,9 @@ function M.goto_super()
     -- (by line text: the freshly shown buffer has no treesitter parser yet, so
     -- get_node() was nil and the first match was always kept)
     for _ = 1, 50 do
-      if not vim.api.nvim_get_current_line():match("^%s*/[/*]") and not vim.api.nvim_get_current_line():match("^%s*%*") then
+      if
+        not vim.api.nvim_get_current_line():match("^%s*/[/*]") and not vim.api.nvim_get_current_line():match("^%s*%*")
+      then
         break
       end
       if vim.fn.search(pat, "w") == 0 then
@@ -89,7 +91,10 @@ function M.local_usages()
         bufnr = buf,
         lnum = lnum,
         col = h.range.start.character + 1,
-        text = ("[%s] %s"):format(kind[h.kind or 3], vim.trim(vim.api.nvim_buf_get_lines(buf, lnum - 1, lnum, false)[1] or "")),
+        text = ("[%s] %s"):format(
+          kind[h.kind or 3],
+          vim.trim(vim.api.nvim_buf_get_lines(buf, lnum - 1, lnum, false)[1] or "")
+        ),
       }
     end
     table.sort(items, function(a, b)
@@ -137,7 +142,15 @@ function M.group_usages(locs, lines_of, rel)
     local g = M.usage_group("/" .. path, text)
     counts[g] = counts[g] + 1
     files[path] = true
-    items[#items + 1] = { group = g, path = path, lnum = range.start.line + 1, col = range.start.character, text = vim.trim(text), uri = uri, range = range }
+    items[#items + 1] = {
+      group = g,
+      path = path,
+      lnum = range.start.line + 1,
+      col = range.start.character,
+      text = vim.trim(text),
+      uri = uri,
+      range = range,
+    }
   end
   local order = {}
   for i, g in ipairs(M.GROUPS) do
@@ -193,7 +206,10 @@ function M.all_usages(opts)
   M.request_references(buf, client, function(res, err)
     vim.schedule(function()
       if err or not res or #res == 0 then
-        return vim.notify("xyno-rust: no usages found" .. (err and (": " .. tostring(err.message or err)) or ""), vim.log.levels.INFO)
+        return vim.notify(
+          "xyno-rust: no usages found" .. (err and (": " .. tostring(err.message or err)) or ""),
+          vim.log.levels.INFO
+        )
       end
       local cwd = vim.fs.normalize(vim.fn.getcwd())
       local items, summary = M.group_usages(res, M.file_lines, function(p)

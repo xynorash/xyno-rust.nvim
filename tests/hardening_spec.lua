@@ -37,7 +37,15 @@ end)
 --- No element of `argv` (other than the flag names this module adds itself) may start with "-".
 local function option_like_values(argv)
   local bad = {}
-  local own = { ["--all-features"] = true, ["--no-default-features"] = true, ["--features"] = true, ["--target"] = true, ["--workspace"] = true, ["--no-deps"] = true, ["--keep-going"] = true }
+  local own = {
+    ["--all-features"] = true,
+    ["--no-default-features"] = true,
+    ["--features"] = true,
+    ["--target"] = true,
+    ["--workspace"] = true,
+    ["--no-deps"] = true,
+    ["--keep-going"] = true,
+  }
   for _, a in ipairs(argv) do
     if a:sub(1, 1) == "-" and not own[a] then
       bad[#bad + 1] = a
@@ -48,7 +56,7 @@ end
 
 describe("state-file flag validation", function()
   local evil_features = {
-    "--config=build.rustc-wrapper=\"/tmp/x\"",
+    '--config=build.rustc-wrapper="/tmp/x"',
     "-Zunstable-options",
     "a,--manifest-path=/etc/passwd",
     "has space",
@@ -62,26 +70,29 @@ describe("state-file flag validation", function()
     "with-dash.and+plus",
   }
 
-  it("rejects feature names that cargo would read as options (or that split in two) and keeps the valid ones", function()
-    local root = H.tmpdir()
-    vim.fn.writefile({ "[package]", 'name = "x"' }, root .. "/Cargo.toml")
-    write_state({ [root] = { all = false, features = evil_features } })
-    local n = H.capture_notify()
-    local ctx = rc.get(root)
-    H.eq({ "ok_feature", "dep:serde", "pkg/feat", "pkg?/feat", "with-dash.and+plus" }, ctx.features)
-    H.eq({}, option_like_values(rc.cargo_flags(ctx)))
-    vim.wait(100, function()
-      return #n.list > 0
-    end, 10)
-    H.eq(1, #n.list, "one warning, not one per read")
-    H.eq(vim.log.levels.WARN, n.list[1].level)
-    H.match(n.list[1].msg, "ignored invalid feature/target", true)
-    rc.get(root)
-    vim.wait(50, function()
-      return false
-    end, 10)
-    H.eq(1, #n.list, "and not again for the same root")
-  end)
+  it(
+    "rejects feature names that cargo would read as options (or that split in two) and keeps the valid ones",
+    function()
+      local root = H.tmpdir()
+      vim.fn.writefile({ "[package]", 'name = "x"' }, root .. "/Cargo.toml")
+      write_state({ [root] = { all = false, features = evil_features } })
+      local n = H.capture_notify()
+      local ctx = rc.get(root)
+      H.eq({ "ok_feature", "dep:serde", "pkg/feat", "pkg?/feat", "with-dash.and+plus" }, ctx.features)
+      H.eq({}, option_like_values(rc.cargo_flags(ctx)))
+      vim.wait(100, function()
+        return #n.list > 0
+      end, 10)
+      H.eq(1, #n.list, "one warning, not one per read")
+      H.eq(vim.log.levels.WARN, n.list[1].level)
+      H.match(n.list[1].msg, "ignored invalid feature/target", true)
+      rc.get(root)
+      vim.wait(50, function()
+        return false
+      end, 10)
+      H.eq(1, #n.list, "and not again for the same root")
+    end
+  )
 
   it("rejects targets that are options, paths or shell syntax; accepts real triples", function()
     for _, bad in ipairs({ "--config=x", "-Zfoo", "a b", "x;y", "../../evil", "$(x)", "t\nu" }) do
@@ -89,7 +100,14 @@ describe("state-file flag validation", function()
       H.is_nil(ctx.target, bad)
       H.eq({ "--all-features" }, rc.cargo_flags({ all = true, target = bad }))
     end
-    for _, good in ipairs({ "x86_64-unknown-linux-gnu", "wasm32-unknown-unknown", "thumbv7em-none-eabihf", "aarch64-apple-darwin", "x86_64-pc-windows-msvc", "riscv64gc-unknown-linux-gnu" }) do
+    for _, good in ipairs({
+      "x86_64-unknown-linux-gnu",
+      "wasm32-unknown-unknown",
+      "thumbv7em-none-eabihf",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc",
+      "riscv64gc-unknown-linux-gnu",
+    }) do
       H.eq(good, rc.sanitize({ target = good }).target)
       H.eq({ "--all-features", "--target", good }, rc.cargo_flags({ all = true, target = good }))
     end

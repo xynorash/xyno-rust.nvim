@@ -64,8 +64,12 @@ describe("rust_routes.collect_async", function()
     H.wait_for(function()
       return got
     end, 20000, "scan")
-    table.sort(want, function(a, b) return a.text < b.text end)
-    table.sort(got, function(a, b) return a.text < b.text end)
+    table.sort(want, function(a, b)
+      return a.text < b.text
+    end)
+    table.sort(got, function(a, b)
+      return a.text < b.text
+    end)
     H.eq(#want, #got)
     H.eq(want, got)
     H.eq(60, #got)
@@ -84,7 +88,10 @@ describe("rust_routes.collect_async", function()
       end, 60000, "scan")
     end)
     H.eq(2400, #got)
-    H.ok(stall < 80, ("the main thread was held for %.0f ms in one go (slice budget %d ms)"):format(stall, R.config.slice_ms))
+    H.ok(
+      stall < 80,
+      ("the main thread was held for %.0f ms in one go (slice budget %d ms)"):format(stall, R.config.slice_ms)
+    )
     -- control: the unsliced walk does hold it for a long time on the same tree
     R.clear_cache()
     local t0 = vim.uv.hrtime()
