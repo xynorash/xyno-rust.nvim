@@ -107,11 +107,15 @@ describe(":RustRename (real rust-analyzer)", function()
     local dir, buf = setup_buf()
     wait_analysed(buf)
     local lib = H.open(dir .. "/src/lib.rs")
-    vim.lsp.buf_attach_client(lib, vim.lsp.get_clients({ name = "rust-analyzer" })[1].id)
+    vim.lsp.buf_attach_client(lib, vim.lsp.get_clients({ bufnr = buf, name = "rust-analyzer" })[1].id)
     vim.api.nvim_win_set_cursor(0, { 1, 8 }) -- `util` in `pub mod util;`
     local got
-    R.rename("tools", { pick = function(items) got = items end })
-    H.wait_for(function() return got end, 60000, "module rename edit")
+    H.wait_for(function()
+      if got then return true end
+      R.rename("tools", { pick = function(items) got = items end })
+      vim.wait(1500, function() return got ~= nil end)
+      return got
+    end, 90000, "module rename edit (retried until rust-analyzer has indexed the module)")
     local ops
     for _, i in ipairs(got) do
       if i.ops then ops = i end
