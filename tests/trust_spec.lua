@@ -139,6 +139,118 @@ describe("trust store", function()
   end)
 end)
 
+describe("trust follows the content that runs code (re-ask when it changed)", function()
+  local function ws()
+    local dir = H.tmpdir() .. "/drift"
+    write(dir .. "/Cargo.toml", '[package]\nname = "d"\nversion = "0.1.0"\nedition = "2021"\n')
+    write(dir .. "/src/lib.rs", "pub fn f() {}\n")
+    return dir
+  end
+
+  it("a trusted workspace stays trusted while its manifests, build scripts, cargo config and toolchain are unchanged", function()
+    local dir = ws()
+    trust.trust(dir)
+    H.ok(trust.is_trusted(dir))
+    write(dir .. "/src/lib.rs", "pub fn g() {}\n") -- ordinary source edits never ask again
+    write(dir .. "/Cargo.lock", "# lock\n")
+    H.ok(trust.is_trusted(dir))
+    H.is_nil(trust.drift(dir))
+  end)
+
+  it("a changed or new Cargo.toml / build.rs / .cargo/config.toml / rust-toolchain.toml makes it untrusted again and names the file", function()
+    for _, case in ipairs({
+      { "Cargo.toml", '[package]\nname = "d"\nversion = "0.1.0"\nedition = "2021"\nbuild = "evil.rs"\n' },
+      { "build.rs", "fn main() {}\n" },
+      { ".cargo/config.toml", '[build]\nrustc-wrapper = "/tmp/x"\n' },
+      { ".cargo/config", '[build]\nrustc = "/tmp/x"\n' },
+      { "rust-toolchain.toml", '[toolchain]\nchannel = "nightly"\n' },
+      { "rust-toolchain", "nightly\n" },
+      { "member/Cargo.toml", '[package]\nname = "m"\nversion = "0.1.0"\n' },
+      { "member/build.rs", "fn main() {}\n" },
+    }) do
+      trust.revoke_all()
+      local dir = ws()
+      trust.trust(dir)
+      H.ok(trust.is_trusted(dir), case[1] .. " before")
+      write(dir .. "/" .. case[1], case[2])
+      H.not_ok(trust.is_trusted(dir), case[1] .. " changed: untrusted")
+      local d = trust.drift(dir)
+      H.ok(d and vim.tbl_contains(d, case[1]), case[1] .. " is named in the drift: " .. vim.inspect(d))
+    end
+  end)
+
+  it("a removed file counts as a change", function()
+    local dir = ws()
+    write(dir .. "/build.rs", "fn main() {}\n")
+    trust.trust(dir)
+    os.remove(dir .. "/build.rs")
+    H.not_ok(trust.is_trusted(dir))
+  end)
+
+  it("trusting again (prompt answer or :RustTrust add) records the new content; 'run once' records nothing", function()
+    local dir = ws()
+    trust.trust(dir)
+    write(dir .. "/build.rs", "fn main() {}\n")
+    H.not_ok(trust.is_trusted(dir))
+    local seen = answer("once")
+    local ran
+    trust.require(dir, "cargo test", function(ok)
+      ran = ok
+    end)
+    H.eq(true, ran)
+    H.eq(1, seen.n)
+    H.match(seen.prompts[1], "changed since", true, "the prompt says why it asks again")
+    H.match(seen.prompts[1], "build.rs", true)
+    H.not_ok(trust.is_trusted(dir), "once stores nothing")
+    answer("trust")
+    trust.require(dir, "cargo test", function() end)
+    H.ok(trust.is_trusted(dir))
+    H.is_nil(trust.drift(dir))
+  end)
+
+  it("rehash() records the current content (an edit made inside the editor does not ask again)", function()
+    local dir = ws()
+    trust.trust(dir)
+    write(dir .. "/Cargo.toml", '[package]\nname = "d"\nversion = "0.2.0"\nedition = "2021"\n')
+    H.not_ok(trust.is_trusted(dir))
+    H.eq(true, trust.rehash(dir))
+    H.ok(trust.is_trusted(dir))
+    trust.revoke(dir)
+    H.eq(false, trust.rehash(dir), "no entry of its own: nothing to refresh")
+    H.not_ok(trust.is_trusted(dir))
+  end)
+
+  it("an entry written before hashes existed is adopted silently, not re-asked", function()
+    local dir = ws()
+    local path = trust.normalize(dir)
+    require("xyno_rust.statefile").update(trust.file(), function(all)
+      all[path] = { recursive = false, at = 1 }
+    end)
+    H.ok(trust.is_trusted(dir))
+    write(dir .. "/build.rs", "fn main() {}\n")
+    H.not_ok(trust.is_trusted(dir), "the first look recorded the content, a later change asks")
+  end)
+
+  it("trust under a parent (recursive) is one decision about the whole tree: no hash, no re-ask", function()
+    local dir = ws()
+    trust.trust(vim.fs.dirname(dir), { recursive = true })
+    write(dir .. "/build.rs", "fn main() {}\n")
+    H.ok(trust.is_trusted(dir))
+    H.is_nil(trust.drift(dir))
+  end)
+
+  it("the scan ignores target/ and .git/ and is bounded", function()
+    local dir = ws()
+    trust.trust(dir)
+    write(dir .. "/target/debug/build/x/build.rs", "fn main() {}\n")
+    write(dir .. "/.git/hooks/Cargo.toml", "x")
+    H.ok(trust.is_trusted(dir))
+    local f = trust.fingerprint(dir)
+    H.ok(f.hash and f.hash ~= "")
+    H.ok(vim.tbl_count(f.files) <= 400)
+  end)
+end)
+
 describe("trust.require", function()
   it("a trusted root calls back at once without asking", function()
     local dir = H.tmpdir()

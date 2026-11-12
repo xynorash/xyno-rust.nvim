@@ -10,7 +10,7 @@
 -- A configuration is data, never a shell line:
 --   { name, cmd = "run"|"test"|"bench"|"build"|"check"|"clippy", package?, bin?|example?|test?|bench?|lib?,
 --     cargo_args = "--release", args = "--port 8080 'a b'", env = { RUST_LOG = "debug" },
---     profiler = "none"|"samply"|"flamegraph" }
+--     profiler = "none"|"samply"|"flamegraph"|"perf" }  -- "perf": record, then :RustProfile shows it in the editor
 -- `cargo_args` and `args` are split with split_args (quotes group, nothing is expanded: no `$VAR`, no
 -- backticks, no `;`), the result is an argv list and goes to the terminal as one: a configuration can not
 -- run anything but cargo (or, for profilers, samply / cargo-flamegraph) with the arguments that were typed.
@@ -28,7 +28,7 @@
 local M = {}
 
 M.CMDS = { "run", "test", "bench", "build", "check", "clippy" }
-M.PROFILERS = { "none", "samply", "flamegraph" }
+M.PROFILERS = { "none", "samply", "flamegraph", "perf" }
 -- only these can profile a binary
 local TARGET_KEYS = { "bin", "example", "test", "bench", "lib" }
 
@@ -482,7 +482,7 @@ function M.build(cfg, ctx_flags, meta)
     if cfg.cmd ~= "run" or not cfg.bin then
       return nil, "profilers need a configuration that runs a binary (command run, a --bin target)"
     end
-    if cfg.profiler == "samply" then
+    if cfg.profiler == "samply" or cfg.profiler == "perf" then
       local pkg
       for _, p in ipairs(meta and meta.packages or {}) do
         if (not cfg.package or p.name == cfg.package) then
@@ -506,10 +506,22 @@ function M.build(cfg, ctx_flags, meta)
       vim.list_extend(build, { "-p", pkg.name, "--bin", cfg.bin })
       vim.list_extend(build, features)
       vim.list_extend(build, cargo_extra)
-      local argv = { "sh", "-c", table.concat(vim.tbl_map(vim.fn.shellescape, build), " ") .. ' && exec samply record "$@"', "samply", exe }
       if vim.fn.has("win32") == 1 then
-        return nil, "samply from a run configuration needs a POSIX shell; use :RustTargets on Windows"
+        return nil, cfg.profiler .. " from a run configuration needs a POSIX shell; use :RustTargets on Windows"
       end
+      local bs = table.concat(vim.tbl_map(vim.fn.shellescape, build), " ")
+      if cfg.profiler == "perf" then
+        -- record, then convert to text next to it: `:RustProfile` shows target/xyno-profile/perf.script
+        local dir = meta.target_directory .. "/xyno-profile"
+        local d = vim.fn.shellescape(dir)
+        local line = bs
+          .. (" && mkdir -p %s && perf record -F 999 --call-graph dwarf,16384 -o %s/perf.data -- \"$@\""):format(d, d)
+          .. (" && perf script -i %s/perf.data > %s/perf.script && echo 'profile ready: :RustProfile'"):format(d, d)
+        local argv = { "sh", "-c", line, "perf", exe }
+        vim.list_extend(argv, prog)
+        return { argv = argv, env = cfg.env, tool = "perf", label = label }
+      end
+      local argv = { "sh", "-c", bs .. ' && exec samply record "$@"', "samply", exe }
       vim.list_extend(argv, prog)
       return { argv = argv, env = cfg.env, tool = "samply", label = label }
     end
@@ -579,6 +591,8 @@ M.open = open
 local function exe_ok(tool)
   if tool == "samply" then
     return vim.fn.executable("samply") == 1, "samply is not installed (cargo install samply)"
+  elseif tool == "perf" then
+    return vim.fn.executable("perf") == 1, "perf is not installed (your distribution's perf / linux-tools package)"
   elseif tool == "cargo-flamegraph" then
     return vim.fn.executable("cargo-flamegraph") == 1, "cargo-flamegraph is not installed (cargo install flamegraph)"
   end

@@ -1,0 +1,76 @@
+hot 123456 4301.001000:     250000 cpu-clock:u: 
+	    5581d1a3b000 hot::spin::h1a2b3c4d5e6f7081+0x14 (/tmp/hot/target/profiling/hot)
+	    5581d1a3b02a hot::main::h0123456789abcdef+0x60 (/tmp/hot/target/profiling/hot)
+	    5581d1a3b054 __libc_start_call_main+0x7a (/usr/lib/libc.so.6)
+	    5581d1a3b07e __libc_start_main_impl+0x8b (/usr/lib/libc.so.6)
+	    5581d1a3b0a8 _start+0x25 (/tmp/hot/target/profiling/hot)
+
+hot 123456 4301.002000:     250000 cpu-clock:u: 
+	    5581d1a3b000 hot::spin::h1a2b3c4d5e6f7081+0x14 (/tmp/hot/target/profiling/hot)
+	    5581d1a3b02a hot::main::h0123456789abcdef+0x60 (/tmp/hot/target/profiling/hot)
+	    5581d1a3b054 __libc_start_call_main+0x7a (/usr/lib/libc.so.6)
+	    5581d1a3b07e __libc_start_main_impl+0x8b (/usr/lib/libc.so.6)
+	    5581d1a3b0a8 _start+0x25 (/tmp/hot/target/profiling/hot)
+
+hot 123456 4301.003000:     250000 cpu-clock:u: 
+	    5581d1a3b000 hot::spin::h1a2b3c4d5e6f7081+0x14 (/tmp/hot/target/profiling/hot)
+	    5581d1a3b02a hot::main::h0123456789abcdef+0x60 (/tmp/hot/target/profiling/hot)
+	    5581d1a3b054 __libc_start_call_main+0x7a (/usr/lib/libc.so.6)
+	    5581d1a3b07e __libc_start_main_impl+0x8b (/usr/lib/libc.so.6)
+	    5581d1a3b0a8 _start+0x25 (/tmp/hot/target/profiling/hot)
+
+hot 123456 4301.004000:     250000 cpu-clock:u: 
+	    5581d1a3b000 hot::spin::h1a2b3c4d5e6f7081+0x14 (/tmp/hot/target/profiling/hot)
+	    5581d1a3b02a hot::main::h0123456789abcdef+0x60 (/tmp/hot/target/profiling/hot)
+	    5581d1a3b054 __libc_start_call_main+0x7a (/usr/lib/libc.so.6)
+	    5581d1a3b07e __libc_start_main_impl+0x8b (/usr/lib/libc.so.6)
+	    5581d1a3b0a8 _start+0x25 (/tmp/hot/target/profiling/hot)
+
+hot 123456 4301.005000:     250000 cpu-clock:u: 
+	    5581d1a3b000 hot::spin::h1a2b3c4d5e6f7081+0x14 (/tmp/hot/target/profiling/hot)
+	    5581d1a3b02a hot::main::h0123456789abcdef+0x60 (/tmp/hot/target/profiling/hot)
+	    5581d1a3b054 __libc_start_call_main+0x7a (/usr/lib/libc.so.6)
+	    5581d1a3b07e __libc_start_main_impl+0x8b (/usr/lib/libc.so.6)
+	    5581d1a3b0a8 _start+0x25 (/tmp/hot/target/profiling/hot)
+
+hot 123456 4301.006000:     250000 cpu-clock:u: 
+	    5581d1a3b000 hot::fib::h9988776655443322+0x2c (/tmp/hot/target/profiling/hot)
+	    5581d1a3b02a hot::fib::h9988776655443322+0x2c (/tmp/hot/target/profiling/hot)
+	    5581d1a3b054 hot::fib::h9988776655443322+0x2c (/tmp/hot/target/profiling/hot)
+	    5581d1a3b07e hot::main::h0123456789abcdef+0x60 (/tmp/hot/target/profiling/hot)
+	    5581d1a3b0a8 __libc_start_call_main+0x7a (/usr/lib/libc.so.6)
+	    5581d1a3b0d2 __libc_start_main_impl+0x8b (/usr/lib/libc.so.6)
+	    5581d1a3b0fc _start+0x25 (/tmp/hot/target/profiling/hot)
+
+hot 123456 4301.007000:     250000 cpu-clock:u: 
+	    5581d1a3b000 hot::fib::h9988776655443322+0x2c (/tmp/hot/target/profiling/hot)
+	    5581d1a3b02a hot::fib::h9988776655443322+0x2c (/tmp/hot/target/profiling/hot)
+	    5581d1a3b054 hot::fib::h9988776655443322+0x2c (/tmp/hot/target/profiling/hot)
+	    5581d1a3b07e hot::main::h0123456789abcdef+0x60 (/tmp/hot/target/profiling/hot)
+	    5581d1a3b0a8 __libc_start_call_main+0x7a (/usr/lib/libc.so.6)
+	    5581d1a3b0d2 __libc_start_main_impl+0x8b (/usr/lib/libc.so.6)
+	    5581d1a3b0fc _start+0x25 (/tmp/hot/target/profiling/hot)
+
+hot 123456 4301.008000:     250000 cpu-clock:u: 
+	    5581d1a3b000 hot::fib::h9988776655443322+0x2c (/tmp/hot/target/profiling/hot)
+	    5581d1a3b02a hot::fib::h9988776655443322+0x2c (/tmp/hot/target/profiling/hot)
+	    5581d1a3b054 hot::main::h0123456789abcdef+0x60 (/tmp/hot/target/profiling/hot)
+	    5581d1a3b07e __libc_start_call_main+0x7a (/usr/lib/libc.so.6)
+	    5581d1a3b0a8 __libc_start_main_impl+0x8b (/usr/lib/libc.so.6)
+	    5581d1a3b0d2 _start+0x25 (/tmp/hot/target/profiling/hot)
+
+hot 123456 4301.009000:     250000 cpu-clock:u: 
+	    5581d1a3b000 <alloc::vec::Vec<T> as core::ops::drop::Drop>::drop+0x1c (/tmp/hot/target/profiling/hot)
+	    5581d1a3b02a core::ptr::drop_in_place<alloc::vec::Vec<u8>>::h00112233445566ff+0x9 (/tmp/hot/target/profiling/hot)
+	    5581d1a3b054 hot::main::h0123456789abcdef+0x60 (/tmp/hot/target/profiling/hot)
+	    5581d1a3b07e __libc_start_call_main+0x7a (/usr/lib/libc.so.6)
+	    5581d1a3b0a8 __libc_start_main_impl+0x8b (/usr/lib/libc.so.6)
+	    5581d1a3b0d2 _start+0x25 (/tmp/hot/target/profiling/hot)
+
+hot 123456 4301.010000:     250000 cpu-clock:u: 
+	    5581d1a3b000 [unknown] ([unknown])
+	    5581d1a3b02a hot::main::h0123456789abcdef+0x60 (/tmp/hot/target/profiling/hot)
+	    5581d1a3b054 __libc_start_call_main+0x7a (/usr/lib/libc.so.6)
+	    5581d1a3b07e __libc_start_main_impl+0x8b (/usr/lib/libc.so.6)
+	    5581d1a3b0a8 _start+0x25 (/tmp/hot/target/profiling/hot)
+

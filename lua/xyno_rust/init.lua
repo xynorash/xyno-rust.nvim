@@ -43,6 +43,7 @@ M.defaults = {
     restart = true, -- xyno_rust.rust_restart: server supervision
     runs = true, -- xyno_rust.run_configs: :RustRun, :RustRunLast, :RustRunEdit, :RustRunDelete (saved per project)
     actions = true, -- xyno_rust.action_menu: :RustActions, :RustRefactor (diff preview), :RustFixAll
+    profile = true, -- xyno_rust.profiler: :RustProfile (in-editor hot functions / call tree)
     trust = true, -- xyno_rust.trust: :RustTrust (the trust API works without it; this only defines the command)
   },
   tools = {}, -- :RustTools list: { hide = { "audit", ... }, extra = { { text = "...", cmd = { "cargo", ... }, flags = false } } }
@@ -167,6 +168,9 @@ function M.setup(opts)
   end
   if m.runs then
     require("xyno_rust.run_configs").setup(sub)
+  end
+  if m.profile then
+    require("xyno_rust.profiler").setup(sub)
   end
   if m.routes then
     require("xyno_rust.rust_routes").setup(sub)
