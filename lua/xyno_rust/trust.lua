@@ -373,7 +373,7 @@ function M.ask(root, what, cb)
       end)
     end
     for _, f in ipairs(mine) do
-      pcall(f, answer)
+      f(answer)
     end
   end
   if not M._leave_hooked then
@@ -409,6 +409,9 @@ function M.ask(root, what, cb)
     finish(kind == "once")
   end)
   if not ok then
+    if asking[path] ~= mine then
+      error(err, 0) -- the prompt answered and a callback raised: that is the caller's error, not the prompt's
+    end
     vim.notify("xyno-rust: the trust prompt failed: " .. tostring(err), vim.log.levels.WARN)
     finish(false)
   end
