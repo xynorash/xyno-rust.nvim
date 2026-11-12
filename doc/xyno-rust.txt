@@ -112,6 +112,17 @@ nothing. Calling it again replaces the autocommands.
                         bench, lib) and run, test, build, bench, profile it in
                         a bottom terminal. Honours |:RustContext|.
 
+                                                                  *:RustActions*
+:RustActions            Code actions at the cursor or selection in a picker;
+                        the preview is the diff the action would make.
+                                                                 *:RustRefactor*
+:RustRefactor           The same for refactor.* actions only.
+                                                                   *:RustFixAll*
+:RustFixAll             Apply the preferred quick fixes of the buffer as one
+                        undo step. Cargo-check diagnostics are skipped while
+                        the buffer has unsaved changes (they describe the
+                        saved text); it waits for rust-analyzer to be idle.
+
                                                                      *:RustRun*
 :RustRun [name]         Run configurations saved per project: a named cargo
                         command with target, program arguments (after --),
@@ -234,6 +245,12 @@ xyno_rust.rust_tasks                                      *xyno_rust.rust_tasks*
     targets()  tools()  new({name}?)  act_job()  doctests()
     samply_cmd({build}, {bin})       argv for "build, then samply record"
     target_items({root}, {meta})     the |:RustTargets| picker items
+
+xyno_rust.action_menu                                    *xyno_rust.action_menu*
+    open({opts})  actions()  refactor()  fix_all({buf}, {opts}, {cb})
+    edit_diff({edit}, {enc}?)  plain_edit({edit})  strip_snippet({s})
+    sort({list})  items({list})  apply({action}, {cb})
+    wait_idle({buf}, {ms}, {cb})
 
 xyno_rust.run_configs                                    *xyno_rust.run_configs*
     split_args({s})  join_args({words})  parse_env({s})  format_env({env})

@@ -6,7 +6,8 @@ local M = {}
 --- as "major.minor". The major number changes when a module function they call is removed or changes
 --- meaning; the minor number when functions are added. `M.version` is the plugin release.
 ---   1.0  the modules as they were extracted from xynovim
----   1.2  run_configs.lua (:RustRun and friends); nothing older changed
+---   1.2  run_configs.lua (:RustRun and friends), action_menu.lua (:RustActions, :RustRefactor, :RustFixAll);
+---        nothing older changed
 ---   1.1  async cargo layer (cargo.lua), trust.lua, rust_context.root_async / root(path, { nowait }),
 ---        rust_routes.collect_async; every older function keeps its signature and result
 M.api_version = "1.2"
@@ -41,6 +42,7 @@ M.defaults = {
     status = true, -- xyno_rust.lsp_status: readiness indicator (event driven)
     restart = true, -- xyno_rust.rust_restart: server supervision
     runs = true, -- xyno_rust.run_configs: :RustRun, :RustRunLast, :RustRunEdit, :RustRunDelete (saved per project)
+    actions = true, -- xyno_rust.action_menu: :RustActions, :RustRefactor (diff preview), :RustFixAll
     trust = true, -- xyno_rust.trust: :RustTrust (the trust API works without it; this only defines the command)
   },
   tools = {}, -- :RustTools list: { hide = { "audit", ... }, extra = { { text = "...", cmd = { "cargo", ... }, flags = false } } }
@@ -159,6 +161,9 @@ function M.setup(opts)
   end
   if m.tasks then
     require("xyno_rust.rust_tasks").setup(sub)
+  end
+  if m.actions then
+    require("xyno_rust.action_menu").setup(sub)
   end
   if m.runs then
     require("xyno_rust.run_configs").setup(sub)

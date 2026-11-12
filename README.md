@@ -90,6 +90,8 @@ No global keymap is set by default. `keymaps = true` maps these, buffer-local in
 | `:RustContext show` / `reset` | Print the context of this workspace / forget the stored choice. |
 | `:RustTargets` | Pick a target of the workspace (bin, example, test, bench, lib) and run, test, build, bench or profile it in a bottom terminal. |
 | `:RustRun [name]` | Run configurations, saved per project (name, cargo command, target, program arguments, cargo arguments, environment variables, optional profiler). No name: a picker (`<CR>` runs, `<C-e>` edits, `<C-x>` deletes, "+ new configuration..." makes one with a few prompts); the first time it offers one run configuration per binary / example and "test all". See "Run configurations". |
+| `:RustActions` / `:RustRefactor` | Code actions at the cursor or selection in a picker, each with the diff it would make as a preview (computed from the action's own edit, after `codeAction/resolve`); `:RustRefactor` lists only `refactor.*` (extract, inline, rewrite). The chosen action's edit is applied as plain text (snippet tab stops are dropped, their default text stays), then its command. |
+| `:RustFixAll` | Apply rust-analyzer's *preferred* quick fixes for the diagnostics of the buffer as one text edit (one undo step): rust-analyzer has no `source.fixAll`. Details below. |
 | `:RustRunLast` / `:RustRunEdit [name]` / `:RustRunDelete name` | Run the previous configuration again / edit or create one / delete one. |
 | `:RustTools` | Pick a workspace tool: timings, bloat, machete, deny, audit, duplicate versions, coverage summary. |
 | `:RustRoutes` | Pick an axum / actix / rocket route and jump to it. |
@@ -111,6 +113,7 @@ Every module can be required on its own. `:help xyno-rust-api` has the signature
 | `xyno_rust.fsutil` | `rename(tmp, dest)`, `slash(path)` |
 | `xyno_rust.rust_context` | `root(path?, opts?)`, `root_async(path, cb)`, `warm()`, `get(root)`, `apply(root, ctx?)`, `pick()`, `reset()`, `describe(ctx?)`, `ra_cargo(ctx?)`, `cargo_flags(ctx?)`, `bacon_args(ctx?)`, `canon(path)`, `valid_feature(name)`, `valid_target(triple)`, `sanitize(ctx)` |
 | `xyno_rust.rust_tasks` | `targets()`, `tools()`, `new(name?)`, `act_job()`, `doctests()`, `samply_cmd(build, bin)`, `target_items(root, meta)` |
+| `xyno_rust.action_menu` | `open(opts)`, `actions()`, `refactor()`, `fix_all(buf, opts, cb)`, `fix_all_cmd()`, `edit_diff(edit, enc?)`, `plain_edit(edit)`, `strip_snippet(s)`, `sort(list)`, `items(list)`, `apply(action, cb)`, `wait_idle(buf, ms, cb)` |
 | `xyno_rust.run_configs` | `split_args(s)`, `join_args(words)`, `parse_env(s)`, `format_env(env)`, `sanitize(cfg)`, `load(root)`, `save(root, cfg, replace?)`, `delete(root, name)`, `set_last(root, name)`, `build(cfg, ctx_flags, meta?)`, `defaults(meta)`, `run(root, cfg, meta)`, `pick()`, `run_named(name?)`, `edit(root, meta, cfg?)`, `prompt(...)`, `PROFILING_FLAGS`, `file()` |
 | `xyno_rust.rust_routes` | `scan_source(src)`, `collect(root)`, `collect_async(root, cb)`, `clear_cache(root?)`, `pending()`, `pick()`, `config` |
 | `xyno_rust.rust_nav` | `goto_super()`, `local_usages()` |
@@ -121,6 +124,12 @@ Every module can be required on its own. `:help xyno-rust-api` has the signature
 | `xyno_rust.deps` | `snacks()` |
 
 A context is `{ all = boolean, no_default = boolean, features = string[], target = string? }`; nothing stored means all features and the host target. It lives in `stdpath("state")/rust-context.json`, keyed by workspace root. The buffer variable `vim.b.xyno_rust_stopped` (`{ [server] = true }`) marks the buffers of a server that exited.
+
+## Fix all, and why it is careful
+
+`:RustFixAll` applies only quick fixes rust-analyzer marks as preferred (remove an unused import, prefix an unused variable, remove a needless `mut`), never "ignore" or "allow" fixes, and only when the whole edit stays inside the buffer (no command, no file operation). Identical fixes are applied once; overlapping ones wait for the next run. It is one round: after the edit the diagnostics are stale until the next publish, so chaining is running it again.
+
+The reason for the care was measured: a quick-fix request for a stale diagnostic comes back as an edit for the *old* positions (three lines inserted above the code, and the fix deleted two of them). Diagnostics from `cargo check` (`rustc`, `clippy`, bacon-ls) describe the last saved text and do not move while you type, so with unsaved changes only rust-analyzer's own diagnostics are used and the others are reported as skipped ("save and run again"). The command also waits (up to 8 s) for rust-analyzer to be idle, as the statusline component sees it.
 
 ## Run configurations
 
