@@ -19,8 +19,12 @@
 -- `--all-features` or `--no-default-features` itself.
 --
 -- Storage: stdpath("state")/xyno-rust-run-configs.json, keyed by workspace root, like the :RustContext
--- choice. It is NOT read from the project: a repository can not ship a run configuration that runs on your
--- machine. Running one still asks for workspace trust once (trust.lua), like :RustTargets.
+-- choice. Running one asks for workspace trust once (trust.lua), like :RustTargets.
+-- Sharing (opt-in): <root>/.xynovim/run.toml, `[[run]]` tables with the same fields (see to_toml), is merged
+-- in AFTER the workspace is trusted (:RustTrust); before that the picker only says how many there are. A
+-- personal configuration with the same name overrides the shared one; shared ones are read-only in the
+-- picker. `:RustRunShare <name>` writes a personal one into the file. Values are sanitized and split into
+-- argv exactly like the personal ones, so the file can run nothing but cargo / the profilers.
 local M = {}
 
 M.CMDS = { "run", "test", "bench", "build", "check", "clippy" }
@@ -188,6 +192,164 @@ function M.load(root)
     res.last = raw.last
   end
   return res
+end
+
+-- ------------------------------------------------------------------ shared (in the repository)
+
+--- <root>/.xynovim/run.toml: run configurations a team commits (the RustRover `.run/` idea). OPT-IN twice:
+--- the file must exist, and the workspace must be trusted (:RustTrust) before one of its entries is
+--- even listed. An untrusted workspace gets a one-line notice (count only), never the content.
+M.SHARED_PATH = ".xynovim/run.toml"
+
+function M.shared_file(root)
+  return root and (require("xyno_rust.trust").normalize(root) .. "/" .. M.SHARED_PATH) or nil
+end
+
+--- Read the shared file. Returns { configs, count, trusted, err }. `configs` is empty unless the
+--- workspace is trusted; `count` is how many entries the file has (so a notice can say so).
+---@return { configs: table[], count: integer, trusted: boolean, err?: string, exists: boolean }
+function M.load_shared(root)
+  local res = { configs = {}, count = 0, trusted = false, exists = false }
+  local path = M.shared_file(root)
+  local st = path and vim.uv.fs_stat(path)
+  if not st or st.type ~= "file" then
+    return res
+  end
+  res.exists = true
+  res.trusted = require("xyno_rust.trust").is_trusted(root)
+  local fd = io.open(path, "rb")
+  local text = fd and fd:read(require("xyno_rust.toml_mini").MAX_BYTES + 1)
+  if fd then
+    fd:close()
+  end
+  if not text then
+    res.err = "cannot read " .. M.SHARED_PATH
+    return res
+  end
+  local doc, err = require("xyno_rust.toml_mini").parse(text)
+  if not doc then
+    res.err = M.SHARED_PATH .. ": " .. err
+    return res
+  end
+  local seen = {}
+  for _, raw in ipairs(type(doc.run) == "table" and doc.run or {}) do
+    local s = M.sanitize(raw)
+    if s and not seen[s.name] then
+      seen[s.name] = true
+      res.count = res.count + 1
+      if res.trusted then
+        s.shared = true
+        res.configs[#res.configs + 1] = s
+      end
+    end
+  end
+  return res
+end
+
+--- Per-user configurations plus the shared ones. A per-user configuration with the same name wins
+--- (a personal override of a team entry). Shared entries are marked `shared = true` and are read-only.
+---@return { configs: table[], last?: string, shared: table }
+function M.load_all(root)
+  local cur = M.load(root)
+  local sh = M.load_shared(root)
+  local have = {}
+  for _, c in ipairs(cur.configs) do
+    have[c.name] = true
+  end
+  local out = vim.list_slice(cur.configs)
+  for _, c in ipairs(sh.configs) do
+    if not have[c.name] then
+      out[#out + 1] = c
+    end
+  end
+  local last = cur.last
+  if last and not vim.tbl_contains(vim.tbl_map(function(c) return c.name end, out), last) then
+    last = nil
+  end
+  return { configs = out, last = last, shared = sh }
+end
+
+--- Write one per-user configuration into the shared file (an explicit user action: `:RustRunShare`).
+--- Replaces an entry of the same name; other entries are kept as they are (re-serialised).
+---@return boolean? ok, string? err
+function M.share(root, name)
+  local c
+  for _, x in ipairs(M.load(root).configs) do
+    if x.name == name then
+      c = x
+    end
+  end
+  if not c then
+    return nil, ("no personal run configuration %q"):format(name)
+  end
+  local path = M.shared_file(root)
+  local entries = {}
+  local sh = M.load_shared(root)
+  if sh.exists and sh.err then
+    return nil, sh.err .. " (fix the file first)"
+  end
+  if sh.exists then
+    -- keep entries even if untrusted: read the raw file again, not the trust-filtered list
+    local fd = io.open(path, "rb")
+    local doc = fd and require("xyno_rust.toml_mini").parse(fd:read("*a"))
+    if fd then
+      fd:close()
+    end
+    for _, raw in ipairs(doc and doc.run or {}) do
+      local s = M.sanitize(raw)
+      if s and s.name ~= c.name then
+        entries[#entries + 1] = s
+      end
+    end
+  end
+  entries[#entries + 1] = c
+  vim.fn.mkdir(vim.fs.dirname(path), "p")
+  local fd, err = io.open(path, "wb")
+  if not fd then
+    return nil, err
+  end
+  fd:write(M.to_toml(entries))
+  fd:close()
+  return true
+end
+
+--- The TOML text of a list of configurations (what `share` writes).
+function M.to_toml(list)
+  local q = require("xyno_rust.toml_mini").quote
+  local out = { "# Run configurations shared through the repository (xyno-rust.nvim). Opened only in a trusted", "# workspace (:RustTrust). `args` and `cargo_args` are split into an argv list, never run by a shell.", "" }
+  for _, c in ipairs(list) do
+    out[#out + 1] = "[[run]]"
+    out[#out + 1] = "name = " .. q(c.name)
+    out[#out + 1] = "cmd = " .. q(c.cmd)
+    if c.package then
+      out[#out + 1] = "package = " .. q(c.package)
+    end
+    for _, k in ipairs(TARGET_KEYS) do
+      if c[k] ~= nil then
+        out[#out + 1] = k .. " = " .. (c[k] == true and "true" or q(c[k]))
+      end
+    end
+    if c.cargo_args ~= "" then
+      out[#out + 1] = "cargo_args = " .. q(c.cargo_args)
+    end
+    if c.args ~= "" then
+      out[#out + 1] = "args = " .. q(c.args)
+    end
+    if c.profiler ~= "none" then
+      out[#out + 1] = "profiler = " .. q(c.profiler)
+    end
+    if next(c.env) then
+      local keys = vim.tbl_keys(c.env)
+      table.sort(keys)
+      local parts = {}
+      for _, k in ipairs(keys) do
+        parts[#parts + 1] = k .. " = " .. q(c.env[k])
+      end
+      out[#out + 1] = "env = { " .. table.concat(parts, ", ") .. " }"
+    end
+    out[#out + 1] = ""
+  end
+  return table.concat(out, "\n")
 end
 
 local function store(root, fn)
@@ -458,7 +620,7 @@ local function with_workspace(cb)
 end
 
 local function find(root, name)
-  for _, c in ipairs(M.load(root).configs) do
+  for _, c in ipairs(M.load_all(root).configs) do
     if c.name == name then
       return c
     end
@@ -628,12 +790,20 @@ M.describe = describe
 --- The picker. Enter runs; <C-e> edits, <C-x> deletes the highlighted configuration.
 function M.pick()
   with_workspace(function(root, meta)
-    local cur = M.load(root)
-    if #cur.configs == 0 then
+    local cur = M.load_all(root)
+    if #cur.configs == 0 and cur.shared.count == 0 then
       for _, c in ipairs(M.defaults(meta)) do
         M.save(root, c)
       end
-      cur = M.load(root)
+      cur = M.load_all(root)
+    end
+    if cur.shared.err then
+      vim.notify("xyno-rust: " .. cur.shared.err, vim.log.levels.WARN)
+    elseif cur.shared.exists and not cur.shared.trusted then
+      vim.notify(
+        ("xyno-rust: %s has %d shared run configuration(s); they are listed after :RustTrust for this workspace"):format(M.SHARED_PATH, cur.shared.count),
+        vim.log.levels.INFO
+      )
     end
     local Snacks = require("xyno_rust.deps").snacks()
     if not Snacks then
@@ -646,7 +816,7 @@ function M.pick()
       return (a.name == cur.last) and (b.name ~= cur.last)
     end)
     for _, c in ipairs(ordered) do
-      items[#items + 1] = { text = describe(c), cfg = c }
+      items[#items + 1] = { text = (c.shared and "[shared] " or "") .. describe(c), cfg = c }
     end
     items[#items + 1] = { text = "+ new configuration...", new = true }
     local function reopen(fn)
@@ -675,12 +845,16 @@ function M.pick()
       end,
       actions = {
         rr_edit = reopen(function(item)
-          if item and item.cfg then
+          if item and item.cfg and item.cfg.shared then
+            vim.notify(("xyno-rust: %q is shared: edit %s (or run it, then copy it with :RustRunEdit)"):format(item.cfg.name, M.SHARED_PATH), vim.log.levels.INFO)
+          elseif item and item.cfg then
             M.edit(root, meta, item.cfg)
           end
         end),
         rr_delete = reopen(function(item)
-          if item and item.cfg and M.delete(root, item.cfg.name) then
+          if item and item.cfg and item.cfg.shared then
+            vim.notify(("xyno-rust: %q is shared: remove it from %s"):format(item.cfg.name, M.SHARED_PATH), vim.log.levels.INFO)
+          elseif item and item.cfg and M.delete(root, item.cfg.name) then
             vim.notify(("xyno-rust: deleted %q"):format(item.cfg.name))
           end
         end),
@@ -704,7 +878,7 @@ function M.run_named(name)
         return vim.notify(("xyno-rust: no run configuration %q (see :RustRun)"):format(name), vim.log.levels.WARN)
       end
     else
-      local cur = M.load(root)
+      local cur = M.load_all(root)
       c = cur.last and find(root, cur.last)
       if not c then
         return vim.notify("xyno-rust: nothing was run yet in this project (:RustRun)", vim.log.levels.INFO)
@@ -719,7 +893,7 @@ local function names(lead)
   local ok, rc = pcall(require, "xyno_rust.rust_context")
   local root = ok and rc.root(nil, { nowait = true })
   if root then
-    for _, c in ipairs(M.load(root).configs) do
+    for _, c in ipairs(M.load_all(root).configs) do
       if c.name:find(lead, 1, true) == 1 then
         out[#out + 1] = c.name
       end
@@ -752,6 +926,16 @@ function M.setup(opts)
       M.edit(root, meta, c or nil)
     end)
   end, { nargs = "?", complete = function(lead) return names(lead) end, desc = "Edit (or create) a run configuration" })
+  cmd("RustRunShare", function(a)
+    with_workspace(function(root)
+      local ok, err = M.share(root, a.args)
+      if ok then
+        vim.notify(("xyno-rust: %q written to %s (commit it to share it)"):format(a.args, M.SHARED_PATH))
+      else
+        vim.notify("xyno-rust: " .. tostring(err), vim.log.levels.WARN)
+      end
+    end)
+  end, { nargs = 1, complete = function(lead) return names(lead) end, desc = "Copy a run configuration into .xynovim/run.toml (shared through the repository)" })
   cmd("RustRunDelete", function(a)
     with_workspace(function(root)
       if M.delete(root, a.args) then
