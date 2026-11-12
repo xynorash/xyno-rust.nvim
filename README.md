@@ -19,7 +19,7 @@ rust-analyzer and bacon-ls (clippy) are two servers that each run cargo. If they
 - [snacks.nvim](https://github.com/folke/snacks.nvim) (picker and terminal) for `:RustContext`, `:RustTargets`, `:RustTools` and `:RustRoutes`. It is not required to load the plugin: without it those commands print one error line and nothing else happens.
 - optional tools, only for the entries that call them: `rustup`, `samply`, `cargo-flamegraph`, `cargo-bloat`, `cargo-machete`, `cargo-deny`, `cargo-audit`, `cargo-llvm-cov`, `act`, `curl`, bacon-ls
 
-No other plugin is required. The profile entries of `:RustTargets` build with `--profile profiling`, which you define yourself (for example `[profile.profiling]` with `inherits = "release"` and `debug = true` in `~/.cargo/config.toml`).
+No other plugin is required. The profile entries of `:RustTargets` and the profiler setting of a run configuration build with `--profile profiling`, which is defined on the command line (`--config profile.profiling.inherits="release"` and `--config profile.profiling.debug=true`): no `[profile.profiling]` is needed in your `Cargo.toml` or `~/.cargo/config.toml`. If `samply` or `cargo-flamegraph` is missing, the entry says so (with the install command) instead of opening a terminal that fails.
 
 ## Install (lazy.nvim)
 
@@ -28,7 +28,7 @@ No other plugin is required. The profile entries of `:RustTargets` build with `-
   "xynorash/xyno-rust.nvim",
   dependencies = { "folke/snacks.nvim" }, -- pickers and terminals
   ft = "rust",
-  cmd = { "RustContext", "RustTargets", "RustTools", "RustRoutes", "RustNew", "RustRestart", "RustTrust", "ActJob" },
+  cmd = { "RustContext", "RustTargets", "RustRun", "RustRunLast", "RustTools", "RustRoutes", "RustNew", "RustRestart", "RustTrust", "ActJob" },
   opts = {},
   keys = {
     { "<leader>rF", "<cmd>RustContext<cr>", ft = "rust", desc = "Cargo features / target" },
@@ -89,6 +89,8 @@ No global keymap is set by default. `keymaps = true` maps these, buffer-local in
 | `:RustContext` | Pick Cargo features (multi-select with `<Tab>`), then a target; applies it to the running rust-analyzer and bacon-ls and stores it for the workspace. |
 | `:RustContext show` / `reset` | Print the context of this workspace / forget the stored choice. |
 | `:RustTargets` | Pick a target of the workspace (bin, example, test, bench, lib) and run, test, build, bench or profile it in a bottom terminal. |
+| `:RustRun [name]` | Run configurations, saved per project (name, cargo command, target, program arguments, cargo arguments, environment variables, optional profiler). No name: a picker (`<CR>` runs, `<C-e>` edits, `<C-x>` deletes, "+ new configuration..." makes one with a few prompts); the first time it offers one run configuration per binary / example and "test all". See "Run configurations". |
+| `:RustRunLast` / `:RustRunEdit [name]` / `:RustRunDelete name` | Run the previous configuration again / edit or create one / delete one. |
 | `:RustTools` | Pick a workspace tool: timings, bloat, machete, deny, audit, duplicate versions, coverage summary. |
 | `:RustRoutes` | Pick an axum / actix / rocket route and jump to it. |
 | `:RustNew [name]` | `cargo new` (bin or lib) in the current directory and open it. |
@@ -109,6 +111,7 @@ Every module can be required on its own. `:help xyno-rust-api` has the signature
 | `xyno_rust.fsutil` | `rename(tmp, dest)`, `slash(path)` |
 | `xyno_rust.rust_context` | `root(path?, opts?)`, `root_async(path, cb)`, `warm()`, `get(root)`, `apply(root, ctx?)`, `pick()`, `reset()`, `describe(ctx?)`, `ra_cargo(ctx?)`, `cargo_flags(ctx?)`, `bacon_args(ctx?)`, `canon(path)`, `valid_feature(name)`, `valid_target(triple)`, `sanitize(ctx)` |
 | `xyno_rust.rust_tasks` | `targets()`, `tools()`, `new(name?)`, `act_job()`, `doctests()`, `samply_cmd(build, bin)`, `target_items(root, meta)` |
+| `xyno_rust.run_configs` | `split_args(s)`, `join_args(words)`, `parse_env(s)`, `format_env(env)`, `sanitize(cfg)`, `load(root)`, `save(root, cfg, replace?)`, `delete(root, name)`, `set_last(root, name)`, `build(cfg, ctx_flags, meta?)`, `defaults(meta)`, `run(root, cfg, meta)`, `pick()`, `run_named(name?)`, `edit(root, meta, cfg?)`, `prompt(...)`, `PROFILING_FLAGS`, `file()` |
 | `xyno_rust.rust_routes` | `scan_source(src)`, `collect(root)`, `collect_async(root, cb)`, `clear_cache(root?)`, `pending()`, `pick()`, `config` |
 | `xyno_rust.rust_nav` | `goto_super()`, `local_usages()` |
 | `xyno_rust.lsp_status` | `component()`, `rust_analyzer(buf?)`, `bacon(buf?)`, `deps(buf?)`, `bacon_failed(id)`, `deps_begin(root, buf?)`, `deps_clear(root?)` |
@@ -118,6 +121,12 @@ Every module can be required on its own. `:help xyno-rust-api` has the signature
 | `xyno_rust.deps` | `snacks()` |
 
 A context is `{ all = boolean, no_default = boolean, features = string[], target = string? }`; nothing stored means all features and the host target. It lives in `stdpath("state")/rust-context.json`, keyed by workspace root. The buffer variable `vim.b.xyno_rust_stopped` (`{ [server] = true }`) marks the buffers of a server that exited.
+
+## Run configurations
+
+A run configuration is a named, saved `cargo run --bin x -- args` with environment variables, the JetBrains idea without the dialog. It is data, not a shell line: `cargo_args` and `args` are split into words (quotes group, a backslash escapes; nothing is expanded, so `$HOME`, backticks and `;` stay literal arguments), the words become one argv list for the terminal, and the program's arguments follow `--`. A configuration can therefore run nothing but `cargo` (or `samply` / `cargo flamegraph` when a profiler is set) with what you typed. The `:RustContext` features are added unless the cargo arguments name `--features`, `-F`, `--all-features` or `--no-default-features` themselves.
+
+They are stored in `stdpath("state")/xyno-rust-run-configs.json`, keyed by workspace root, and never read from the project: a repository cannot ship a configuration that runs on your machine. Running one asks for workspace trust once, like `:RustTargets`. Profilers (`samply`, `cargo flamegraph`) need a binary run; `samply` builds the `profiling` profile and records `target/profiling/<bin>`, with the program's arguments passed as separate arguments to `samply record`.
 
 ## Nothing waits on a process
 
@@ -161,7 +170,7 @@ Limits: the plugin does not start rust-analyzer or bacon-ls, so it cannot stop t
 
 ## Compatibility contract
 
-`require("xyno_rust").api_version` is `"major.minor"` (now `"1.1"`; `version` is the plugin release). The major number changes when a function the other xyno plugins call is removed or changes meaning, the minor number when functions are added. A dependent checks it once:
+`require("xyno_rust").api_version` is `"major.minor"` (now `"1.2"`; `version` is the plugin release). The major number changes when a function the other xyno plugins call is removed or changes meaning, the minor number when functions are added. A dependent checks it once:
 
 ```lua
 local ok, why = require("xyno_rust").compatible("1.1")

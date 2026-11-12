@@ -16,6 +16,15 @@ end
 
 local rc = require("xyno_rust.rust_context")
 
+--- `profiling` = release + debug symbols, defined on the command line so a project (or ~/.cargo/config.toml)
+--- needs no `[profile.profiling]` of its own (run_configs.lua has the same constant).
+local PROFILING_FLAGS = require("xyno_rust.run_configs").PROFILING_FLAGS
+
+local TOOL_HINT = {
+  samply = "samply is not installed (cargo install samply)",
+  ["cargo-flamegraph"] = "cargo-flamegraph is not installed (cargo install flamegraph)",
+}
+
 --- Run in a bottom terminal that stays open after exit 0 (Snacks closes it
 --- by default and the output is gone). A rerun replaces the previous one:
 --- Snacks.terminal would just toggle the finished window.
@@ -96,17 +105,24 @@ function M.target_items(root, meta)
         if win or (triple and triple:find("windows")) then
           bin = bin .. ".exe"
         end
-        local build = { "cargo", "build", "--profile", "profiling", "-p", p.name, "--bin", t.name }
+        local build = { "cargo", "build", "--profile", "profiling" }
+        vim.list_extend(build, PROFILING_FLAGS)
+        vim.list_extend(build, { "-p", p.name, "--bin", t.name })
         vim.list_extend(build, ctx_flags(root))
         items[#items + 1] = {
           text = ("samply  bin %s (%s)"):format(t.name, p.name),
           cmd = M.samply_cmd(build, bin),
+          tool = "samply",
         }
       end
       if kind == "bin" then
         items[#items + 1] = {
           text = ("flamegraph  bin %s (%s)"):format(t.name, p.name),
-          cmd = vim.list_extend({ "cargo", "flamegraph", "--profile", "profiling", "-p", p.name, "--bin", t.name }, flamegraph_flags(root, p)),
+          cmd = vim.list_extend(
+            vim.list_extend({ "cargo", "flamegraph", "--profile", "profiling" }, vim.list_extend(vim.deepcopy(PROFILING_FLAGS), { "-p", p.name, "--bin", t.name })),
+            flamegraph_flags(root, p)
+          ),
+          tool = "cargo-flamegraph",
         }
       end
       for _, a in ipairs(ACTIONS[kind] or {}) do
@@ -147,7 +163,9 @@ function M.targets()
         layout = { preset = "select" },
         confirm = function(picker, item)
           picker:close()
-          if item then
+          if item and item.tool and vim.fn.executable(item.tool) ~= 1 then
+            vim.notify("xyno-rust: " .. TOOL_HINT[item.tool], vim.log.levels.ERROR)
+          elseif item then
             term(item.cmd, root, item.text)
           end
         end,

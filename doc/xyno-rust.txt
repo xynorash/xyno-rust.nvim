@@ -112,6 +112,21 @@ nothing. Calling it again replaces the autocommands.
                         bench, lib) and run, test, build, bench, profile it in
                         a bottom terminal. Honours |:RustContext|.
 
+                                                                     *:RustRun*
+:RustRun [name]         Run configurations saved per project: a named cargo
+                        command with target, program arguments (after --),
+                        cargo arguments, environment variables and an
+                        optional profiler (samply, cargo flamegraph). No
+                        name opens a picker: <CR> runs, <C-e> edits, <C-x>
+                        deletes, "+ new configuration..." creates. Arguments
+                        are split into words and passed as an argv list;
+                        nothing is expanded or run through a shell line.
+                        Stored in stdpath("state")/xyno-rust-run-configs.json,
+                        never read from the project. Asks for workspace trust.
+:RustRunLast            Run the previous configuration again.
+:RustRunEdit [name]     Edit (or create) a configuration.
+:RustRunDelete {name}   Delete a configuration.
+
                                                                     *:RustTools*
 :RustTools              Pick a workspace tool: timings, bloat, machete, deny,
                         audit, duplicate versions, coverage summary.
@@ -219,6 +234,14 @@ xyno_rust.rust_tasks                                      *xyno_rust.rust_tasks*
     targets()  tools()  new({name}?)  act_job()  doctests()
     samply_cmd({build}, {bin})       argv for "build, then samply record"
     target_items({root}, {meta})     the |:RustTargets| picker items
+
+xyno_rust.run_configs                                    *xyno_rust.run_configs*
+    split_args({s})  join_args({words})  parse_env({s})  format_env({env})
+    sanitize({cfg})  load({root})  save({root}, {cfg}, {replace}?)
+    delete({root}, {name})  set_last({root}, {name})
+    build({cfg}, {ctx_flags}, {meta}?)   argv + env of a configuration
+    defaults({meta})  run({root}, {cfg}, {meta})  pick()  run_named({name}?)
+    edit({root}, {meta}, {cfg}?)  PROFILING_FLAGS  file()
 
 xyno_rust.rust_routes                                    *xyno_rust.rust_routes*
     scan_source({src})               routes of a Rust source string, as

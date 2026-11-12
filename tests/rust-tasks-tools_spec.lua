@@ -8,6 +8,13 @@ require("xyno_rust").setup()
 local rc = require("xyno_rust.rust_context")
 local tasks = require("xyno_rust.rust_tasks")
 
+--- The cargo flamegraph command of an item: the profiling profile flags, then `rest`.
+local function flame(rest)
+  local t = { "cargo", "flamegraph", "--profile", "profiling" }
+  vim.list_extend(t, require("xyno_rust.run_configs").PROFILING_FLAGS)
+  return vim.list_extend(t, rest)
+end
+
 -- ------------------------------------------------------------------- stubs
 
 local restores = {}
@@ -301,7 +308,8 @@ describe(":RustTargets items", function()
     local meta = vim.json.decode(
       vim.system({ "cargo", "metadata", "--format-version", "1", "--no-deps" }, { cwd = dir, text = true }):wait().stdout
     )
-    local build = { "cargo", "build", "--profile", "profiling", "-p", "rtt_all", "--bin", "tool", "--all-features" }
+    local build = vim.list_extend({ "cargo", "build", "--profile", "profiling" }, require("xyno_rust.run_configs").PROFILING_FLAGS)
+    vim.list_extend(build, { "-p", "rtt_all", "--bin", "tool", "--all-features" })
     local expected = table.concat(vim.tbl_map(vim.fn.shellescape, build), " ")
       .. " && samply record "
       .. vim.fn.shellescape(meta.target_directory .. "/profiling/tool")
@@ -332,21 +340,21 @@ describe(":RustTargets items", function()
   it("the flamegraph item replaces --all-features by --features <non-default features, sorted>", function()
     local opts = targets_for_all(nil)
     H.eq(
-      { "cargo", "flamegraph", "--profile", "profiling", "-p", "rtt_all", "--bin", "tool", "--features", "a,b" },
+      flame({ "-p", "rtt_all", "--bin", "tool", "--features", "a,b" }),
       item(opts, "flamegraph").cmd
     )
   end)
 
   it("the flamegraph item keeps the target flag and leaves a feature-list context alone", function()
     local opts = targets_for_all({ all = true, target = "x86_64-unknown-linux-gnu" })
-    H.eq({
-      "cargo", "flamegraph", "--profile", "profiling", "-p", "rtt_all", "--bin", "tool",
-      "--target", "x86_64-unknown-linux-gnu", "--features", "a,b",
-    }, item(opts, "flamegraph").cmd)
+    H.eq(
+      flame({ "-p", "rtt_all", "--bin", "tool", "--target", "x86_64-unknown-linux-gnu", "--features", "a,b" }),
+      item(opts, "flamegraph").cmd
+    )
     unstub_all()
     local opts2 = targets_for_all({ all = false, features = { "b" } })
     H.eq(
-      { "cargo", "flamegraph", "--profile", "profiling", "-p", "rtt_all", "--bin", "tool", "--features", "b" },
+      flame({ "-p", "rtt_all", "--bin", "tool", "--features", "b" }),
       item(opts2, "flamegraph").cmd
     )
   end)
@@ -363,7 +371,7 @@ describe(":RustTargets items", function()
     local cap = capture_picker()
     vim.cmd("RustTargets")
     H.drain()
-    H.eq({ "cargo", "flamegraph", "--profile", "profiling", "-p", "p", "--bin", "b" }, item(cap.opts, "flamegraph").cmd)
+    H.eq(flame({ "-p", "p", "--bin", "b" }), item(cap.opts, "flamegraph").cmd)
   end)
 
   it("titles the picker with the context description", function()
