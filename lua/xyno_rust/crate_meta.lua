@@ -86,7 +86,7 @@ function M.exec(argv, opts, cb)
   local function finish(r)
     return { code = r.code, stdout = r.stdout or "", stderr = r.stderr or "" }
   end
-  local ok, res = pcall(vim.system, argv, { text = true, cwd = opts.cwd, timeout = opts.timeout }, cb and vim.schedule_wrap(function(r)
+  local ok, res = pcall(vim.system, argv, { text = true, cwd = opts.cwd, timeout = opts.timeout, env = opts.env }, cb and vim.schedule_wrap(function(r)
     cb(finish(r))
   end) or nil)
   if not ok then
@@ -301,6 +301,15 @@ local function run_metadata(root, cb)
     return meta
   end
   local opts = { cwd = root, timeout = M.config.metadata_timeout_ms }
+  -- Unlike `--no-deps` (cargo.lua), a resolving `cargo metadata` asks rustc for its cfgs, and that goes
+  -- through the workspace's own `.cargo/config.toml`: `build.rustc` / `rustc-wrapper` /
+  -- `rustc-workspace-wrapper` there are executed (checked: tests/trust_spec.lua). So in a workspace
+  -- nobody trusted (trust.lua) the environment overrides those three, and the online run, which could
+  -- also reach a registry credential helper, is not attempted.
+  local trusted = require("xyno_rust.trust").is_trusted(root)
+  if not trusted then
+    opts.env = { RUSTC = "rustc", RUSTC_WRAPPER = "", RUSTC_WORKSPACE_WRAPPER = "", CARGO_BUILD_RUSTC = "rustc", CARGO_BUILD_RUSTC_WRAPPER = "", CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER = "" }
+  end
   -- offline first: deterministic and fast when the registry already has the
   -- crates; the online run only happens when that cannot resolve
   local offline = vim.list_extend(vim.deepcopy(base), { "--offline" })
@@ -308,6 +317,9 @@ local function run_metadata(root, cb)
     local meta, err = parse(r1)
     if meta then
       return cb(meta)
+    end
+    if not trusted then
+      return cb(nil, (err or "cargo metadata failed") .. "\n(workspace not trusted: not retried online; :RustTrust add to allow it)")
     end
     M.exec(base, opts, function(r2)
       local m2, e2 = parse(r2)

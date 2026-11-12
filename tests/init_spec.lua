@@ -120,6 +120,7 @@ describe("snacks.nvim is optional", function()
       vim.cmd.edit(vim.fn.fnameescape(dir .. "/src/lib.rs"))
       rust.setup()
       vim.cmd("RustTools")
+      H.drain()
     end)
     cap.restore()
     _G.Snacks = orig

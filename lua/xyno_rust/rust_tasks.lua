@@ -16,19 +16,11 @@ end
 
 local rc = require("xyno_rust.rust_context")
 
-local function cargo_metadata(root)
-  local o = vim.system({ "cargo", "metadata", "--format-version", "1", "--no-deps" }, { cwd = root, text = true }):wait(30000)
-  if o.code ~= 0 then
-    return nil, o.stderr
-  end
-  return vim.json.decode(o.stdout)
-end
-
 --- Run in a bottom terminal that stays open after exit 0 (Snacks closes it
 --- by default and the output is gone). A rerun replaces the previous one:
 --- Snacks.terminal would just toggle the finished window.
 local last_term
-local function term(cmd, root)
+local function open_term(cmd, root)
   local Snacks = require("xyno_rust.deps").snacks()
   if not Snacks then
     return
@@ -43,6 +35,17 @@ local function term(cmd, root)
     pcall(last_term.close, last_term, { buf = true })
   end
   last_term = Snacks.terminal.open(cmd, { cwd = root, auto_close = false, win = { position = "bottom" } })
+end
+
+--- Every command this module runs executes code that comes with the workspace (build.rs, proc
+--- macros, tests, workflow steps): ask once per workspace root (trust.lua) before running it.
+---@param what string short description for the prompt
+local function term(cmd, root, what)
+  require("xyno_rust.trust").require(root, what or table.concat(cmd, " "), function(ok)
+    if ok then
+      open_term(cmd, root)
+    end
+  end)
 end
 
 --- Feature/target flags of the context (the default is --all-features).
@@ -76,29 +79,31 @@ local ACTIONS = {
   lib = { { "test", "test", "--lib" }, { "doc-test", "test", "--doc" }, { "build", "build", "--lib" } },
 }
 
-function M.targets()
-  local root = rc.root()
-  if not root then
-    return vim.notify("no Cargo.toml found", vim.log.levels.WARN)
-  end
-  local meta, err = cargo_metadata(root)
-  if not meta then
-    return vim.notify("cargo metadata failed: " .. tostring(err), vim.log.levels.ERROR)
-  end
+--- The picker items of a workspace's `cargo metadata --no-deps`.
+function M.target_items(root, meta)
   local items = {}
+  local ctx = rc.get(root)
+  local win = vim.fn.has("win32") == 1
   for _, p in ipairs(meta.packages) do
     for _, t in ipairs(p.targets) do
       local kind = t.kind[1]
       kind = (kind == "proc-macro" or kind == "rlib" or kind == "cdylib" or kind == "staticlib" or kind == "dylib") and "lib" or kind
-      if kind == "bin" then
+      -- `--target T` puts the artefacts in target/T/<profile>/, the context's target is part of the path
+      local triple = ctx and ctx.target
+      if kind == "bin" and not (triple and triple:find("^wasm")) then
         -- `profiling` profile = release + debug symbols (~/.cargo/config.toml)
-        local bin = ("%s/profiling/%s"):format(meta.target_directory, t.name) .. (vim.fn.has("win32") == 1 and ".exe" or "")
+        local bin = ("%s/%sprofiling/%s"):format(meta.target_directory, triple and (triple .. "/") or "", t.name)
+        if win or (triple and triple:find("windows")) then
+          bin = bin .. ".exe"
+        end
         local build = { "cargo", "build", "--profile", "profiling", "-p", p.name, "--bin", t.name }
         vim.list_extend(build, ctx_flags(root))
         items[#items + 1] = {
           text = ("samply  bin %s (%s)"):format(t.name, p.name),
           cmd = M.samply_cmd(build, bin),
         }
+      end
+      if kind == "bin" then
         items[#items + 1] = {
           text = ("flamegraph  bin %s (%s)"):format(t.name, p.name),
           cmd = vim.list_extend({ "cargo", "flamegraph", "--profile", "profiling", "-p", p.name, "--bin", t.name }, flamegraph_flags(root, p)),
@@ -119,22 +124,36 @@ function M.targets()
       end
     end
   end
-  local Snacks = require("xyno_rust.deps").snacks()
-  if not Snacks then
-    return
-  end
-  Snacks.picker({
-    title = "Cargo targets - " .. rc.describe(rc.get(root)),
-    items = items,
-    format = "text",
-    layout = { preset = "select" },
-    confirm = function(picker, item)
-      picker:close()
-      if item then
-        term(item.cmd, root)
+  return items
+end
+
+function M.targets()
+  rc.root_async(nil, function(root)
+    if not root then
+      return vim.notify("no Cargo.toml found", vim.log.levels.WARN)
+    end
+    require("xyno_rust.cargo").metadata_async(root, function(meta, err)
+      if not meta then
+        return vim.notify("cargo metadata failed: " .. tostring(err), vim.log.levels.ERROR)
       end
-    end,
-  })
+      local Snacks = require("xyno_rust.deps").snacks()
+      if not Snacks then
+        return
+      end
+      Snacks.picker({
+        title = "Cargo targets - " .. rc.describe(rc.get(root)),
+        items = M.target_items(root, meta),
+        format = "text",
+        layout = { preset = "select" },
+        confirm = function(picker, item)
+          picker:close()
+          if item then
+            term(item.cmd, root, item.text)
+          end
+        end,
+      })
+    end)
+  end)
 end
 
 --- :RustNew [name]: cargo new (bin or lib) in the current directory and open it.
@@ -144,13 +163,15 @@ function M.new(name)
     if kind == "lib" then
       table.insert(args, "--lib")
     end
-    local o = vim.system(args, { cwd = vim.uv.cwd(), text = true }):wait(30000)
-    if o.code ~= 0 then
-      return vim.notify(o.stderr, vim.log.levels.ERROR)
-    end
-    local dir = vim.uv.cwd() .. "/" .. n
-    vim.cmd.edit(dir .. "/src/" .. (kind == "lib" and "lib.rs" or "main.rs"))
-    vim.notify("created " .. dir)
+    local cwd = vim.uv.cwd()
+    require("xyno_rust.cargo").exec(args, { cwd = cwd, timeout = 30000 }, function(o)
+      if o.code ~= 0 then
+        return vim.notify(o.stderr, vim.log.levels.ERROR)
+      end
+      local dir = cwd .. "/" .. n
+      vim.cmd.edit(dir .. "/src/" .. (kind == "lib" and "lib.rs" or "main.rs"))
+      vim.notify("created " .. dir)
+    end)
   end
   local function with_name(n)
     if not n or n == "" then
@@ -195,37 +216,38 @@ local function has_deny_config(root)
 end
 
 function M.tools()
-  local root = rc.root()
-  if not root then
-    return vim.notify("no Cargo.toml found", vim.log.levels.WARN)
-  end
-  local items = vim.tbl_map(function(t)
-    local cmd = t[2]
-    if t[3] then -- builds the workspace: same features/target as the diagnostics
-      cmd = vim.list_extend(vim.deepcopy(cmd), ctx_flags(root))
+  rc.root_async(nil, function(root)
+    if not root then
+      return vim.notify("no Cargo.toml found", vim.log.levels.WARN)
     end
-    -- no deny.toml: every dependency fails the (empty) licence allow list
-    if t[2][3] == "check" and #t[2] == 3 and not has_deny_config(root) then
-      return { text = t[1] .. " (no deny.toml: licenses skipped)", cmd = { "cargo", "deny", "check", "advisories", "bans", "sources" } }
-    end
-    return { text = t[1], cmd = cmd }
-  end, TOOLS)
-  local Snacks = require("xyno_rust.deps").snacks()
-  if not Snacks then
-    return
-  end
-  Snacks.picker({
-    title = "Cargo tools",
-    items = items,
-    format = "text",
-    layout = { preset = "select" },
-    confirm = function(picker, item)
-      picker:close()
-      if item then
-        term(item.cmd, root)
+    local items = vim.tbl_map(function(t)
+      local cmd = t[2]
+      if t[3] then -- builds the workspace: same features/target as the diagnostics
+        cmd = vim.list_extend(vim.deepcopy(cmd), ctx_flags(root))
       end
-    end,
-  })
+      -- no deny.toml: every dependency fails the (empty) licence allow list
+      if t[2][3] == "check" and #t[2] == 3 and not has_deny_config(root) then
+        return { text = t[1] .. " (no deny.toml: licenses skipped)", cmd = { "cargo", "deny", "check", "advisories", "bans", "sources" } }
+      end
+      return { text = t[1], cmd = cmd }
+    end, TOOLS)
+    local Snacks = require("xyno_rust.deps").snacks()
+    if not Snacks then
+      return
+    end
+    Snacks.picker({
+      title = "Cargo tools",
+      items = items,
+      format = "text",
+      layout = { preset = "select" },
+      confirm = function(picker, item)
+        picker:close()
+        if item then
+          term(item.cmd, root, item.text)
+        end
+      end,
+    })
+  end)
 end
 
 --- :ActJob - run the GitHub Actions job under the cursor locally with `act`.
@@ -249,16 +271,17 @@ function M.act_job()
     return vim.notify("cursor is not inside a job under `jobs:`", vim.log.levels.WARN)
   end
   local root = vim.fs.root(file, ".git") or vim.uv.cwd()
-  term({ "act", "-j", job, "-W", file }, root)
+  term({ "act", "-j", job, "-W", file }, root, "act job " .. job)
 end
 
 --- <leader>tD: neotest (nextest) cannot run doctests.
 function M.doctests()
-  local root = rc.root()
-  if not root then
-    return vim.notify("no Cargo.toml found", vim.log.levels.WARN)
-  end
-  term(vim.list_extend({ "cargo", "test", "--doc", "--workspace" }, ctx_flags(root)), root)
+  rc.root_async(nil, function(root)
+    if not root then
+      return vim.notify("no Cargo.toml found", vim.log.levels.WARN)
+    end
+    term(vim.list_extend({ "cargo", "test", "--doc", "--workspace" }, ctx_flags(root)), root, "cargo test --doc")
+  end)
 end
 
 --- opts.commands = false: do not define :RustTargets, :RustTools, :ActJob, :RustNew.

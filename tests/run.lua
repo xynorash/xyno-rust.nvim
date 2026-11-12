@@ -14,6 +14,30 @@ if vim.env.XYNO_TEST_RTP and vim.env.XYNO_TEST_RTP ~= "" then
   vim.opt.rtp:append(vim.env.XYNO_TEST_RTP) -- e.g. a directory holding parser/rust.so
 end
 
+-- The specs write the real state files (rust-context.json, the trust list) and delete them between
+-- tests: run everything with XDG_STATE_HOME in a temp directory, never the user's own.
+if not vim.env.XYNO_TEST_ISOLATED then
+  local state = vim.fn.tempname()
+  vim.fn.mkdir(state, "p")
+  local argv = { vim.v.progpath, "-l", here .. "/run.lua" }
+  vim.list_extend(argv, arg or {})
+  local r = vim.system(argv, {
+    env = { XDG_STATE_HOME = state, XYNO_TEST_ISOLATED = "1", LOCALAPPDATA = state },
+    stdout = function(_, d)
+      if d then
+        io.stdout:write(d)
+      end
+    end,
+    stderr = function(_, d)
+      if d then
+        io.stderr:write(d)
+      end
+    end,
+  }):wait(1800000)
+  vim.fn.delete(state, "rf")
+  os.exit(r.code)
+end
+
 if not spec then
   local files = vim.fn.glob(repo .. "/tests/*_spec.lua", true, true)
   table.sort(files)

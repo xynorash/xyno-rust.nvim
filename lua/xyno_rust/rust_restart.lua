@@ -215,7 +215,7 @@ local function orphan_rust_buffer()
   for _, b in ipairs(vim.api.nvim_list_bufs()) do
     local name = vim.api.nvim_buf_get_name(b)
     if vim.api.nvim_buf_is_loaded(b) and vim.bo[b].filetype == "rust" and vim.bo[b].buftype == "" and name:sub(1, 1) == "/" and not name:find("/%.cargo/registry/") and not name:find("/%.cargo/git/") and not name:find("/%.rustup/") then
-      local root = rc.root(name)
+      local root = rc.root(name, { nowait = true }) -- (every focus event: never wait for cargo here)
       if root and root:sub(1, 1) == "/" and vim.uv.fs_stat(root .. "/Cargo.toml") then
         return true
       end
@@ -236,7 +236,22 @@ local function server_root(file)
   end
 end
 
-local manifest_timer
+local manifest_timer, focus_timer
+
+local function close_timer(t)
+  if t and not t:is_closing() then
+    t:stop()
+    t:close()
+  end
+end
+
+--- Close the debounce timers (setup() again and VimLeavePre): a libuv timer that is only
+--- dropped from Lua stays registered with the loop until nvim exits.
+function M.teardown()
+  close_timer(manifest_timer)
+  close_timer(focus_timer)
+  manifest_timer, focus_timer = nil, nil
+end
 
 --- A Cargo.toml / Cargo.lock was saved from nvim: show "deps resolving" and restart bacon-ls
 --- once per burst of saves (500 ms debounce). Returns whether `file` was such a manifest.
@@ -250,7 +265,7 @@ function M.manifest_saved(file, buf)
     return false
   end
   require("xyno_rust.lsp_status").deps_begin(root, buf)
-  if manifest_timer then
+  if manifest_timer and not manifest_timer:is_closing() then
     manifest_timer:stop()
   else
     manifest_timer = assert(vim.uv.new_timer())
@@ -324,16 +339,54 @@ function M.server_pids()
   return out
 end
 
---- SIGKILL the processes of `pids` that are still alive after `ms`. A server
+--- Start time of a process in clock ticks (Linux: field 22 of /proc/<pid>/stat), nil where
+--- /proc does not exist. A recycled pid has another start time.
+local function proc_start(pid)
+  local f = io.open(("/proc/%d/stat"):format(pid))
+  if not f then
+    return nil
+  end
+  local line = f:read("*l") or ""
+  f:close()
+  local rest = line:match("^.*%) (.*)$") -- after the last ")" of the (comm) field
+  if not rest then
+    return nil
+  end
+  local i = 2 -- `rest` starts at field 3 (state)
+  for field in rest:gmatch("%S+") do
+    i = i + 1
+    if i == 22 then
+      return tonumber(field)
+    end
+  end
+end
+
+--- Whether `pid` is still the server we mean: a direct child of THIS nvim, whose executable is `name`
+--- and (where /proc says) the same process as when it was noted (`start`). A pid is only a number: after
+--- a server exits it is handed to the next process, which may be another nvim's rust-analyzer.
+local function owned(pid, name, start)
+  local p = vim.api.nvim_get_proc(pid)
+  if not p or p.ppid ~= vim.uv.os_getpid() or p.name:gsub("%.exe$", "") ~= name then
+    return false
+  end
+  return start == nil or proc_start(pid) == start
+end
+M._owned = owned
+
+--- SIGKILL the processes of `pids` (pid -> name) that are still alive after `ms`. A server
 --- that hangs or was SIGSTOPped never answers the shutdown request and a
 --- stopped process does not act on SIGTERM either, so a graceful restart
 --- alone left it in place; its exit then lets the supervision above start a
---- fresh one.
+--- fresh one. Each pid is re-checked at kill time (owned()): child of this nvim, same name,
+--- same start time as now.
 function M.kill_survivors(pids, ms)
+  local noted = {}
+  for pid, name in pairs(pids) do
+    noted[pid] = { name = name, start = proc_start(pid) }
+  end
   vim.defer_fn(function()
-    for pid, name in pairs(pids) do
-      local p = vim.api.nvim_get_proc(pid)
-      if p and p.name:gsub("%.exe$", "") == name then
+    for pid, n in pairs(noted) do
+      if owned(pid, n.name, n.start) then
         vim.uv.kill(pid, "sigkill")
       end
     end
@@ -345,21 +398,46 @@ end
 --- opening a file, and was left behind with PPID 1 (field test, seen under load,
 --- 1 of 40 quits). Those are stopped and SIGKILLed here; initialised servers
 --- shut down through nvim's own exit path.
+---
+--- vim.lsp.rpc exposes no pid, so the processes are found as this nvim's children with the
+--- server's executable name. When more children carry that name than there are uninitialised
+--- clients (an initialised server of the same kind is running too), only the NEWEST ones are
+--- killed - a server that has not initialised is the one just started; without start times
+--- (no /proc) nothing is killed in that case, the stop() above is all that happens.
 function M.kill_uninitialised()
-  local exes = {}
+  local want = {} -- exe -> number of uninitialised clients
   for _, name in ipairs({ "rust-analyzer", "bacon_ls" }) do
     for _, c in ipairs(vim.lsp.get_clients({ name = name })) do
       if not c.initialized then
         swept[c.id] = true
         pcall(c.stop, c, true)
-        exes[name == "bacon_ls" and "bacon-ls" or name] = true
+        local exe = name == "bacon_ls" and "bacon-ls" or name
+        want[exe] = (want[exe] or 0) + 1
       end
     end
   end
-  -- (vim.lsp.rpc exposes no pid: the servers are this nvim's children, by name)
+  local children = {} -- exe -> { { pid, start } }
   for pid, name in pairs(M.server_pids()) do
-    if exes[name] then
-      vim.uv.kill(pid, "sigkill")
+    if want[name] then
+      children[name] = children[name] or {}
+      table.insert(children[name], { pid = pid, start = proc_start(pid) })
+    end
+  end
+  for exe, list in pairs(children) do
+    if #list > want[exe] then
+      local timed = true
+      for _, c in ipairs(list) do
+        timed = timed and c.start ~= nil
+      end
+      table.sort(list, function(a, b)
+        return (a.start or 0) < (b.start or 0)
+      end)
+      list = timed and vim.list_slice(list, #list - want[exe] + 1) or {}
+    end
+    for _, c in ipairs(list) do
+      if owned(c.pid, exe, c.start) then
+        vim.uv.kill(c.pid, "sigkill")
+      end
     end
   end
 end
@@ -401,6 +479,7 @@ end
 
 --- opts.commands = false: do not define :RustRestart (the supervision autocmds stay).
 function M.setup(opts)
+  M.teardown() -- a second setup() must not leave the first one's timers behind
   local group = vim.api.nvim_create_augroup("xyno_rust_restart", { clear = true })
 
   if not (opts and opts.commands == false) then
@@ -423,6 +502,7 @@ function M.setup(opts)
     callback = function()
       M.resume_servers()
       M.kill_uninitialised()
+      M.teardown()
     end,
   })
 
@@ -447,19 +527,18 @@ function M.setup(opts)
     end,
   })
 
-  local timer
   vim.api.nvim_create_autocmd("FocusGained", {
     group = group,
     callback = function()
       if #bacon_clients() == 0 and not orphan_rust_buffer() then
         return
       end
-      if timer then
-        timer:stop()
+      if focus_timer and not focus_timer:is_closing() then
+        focus_timer:stop()
       else
-        timer = assert(vim.uv.new_timer())
+        focus_timer = assert(vim.uv.new_timer())
       end
-      timer:start(
+      focus_timer:start(
         300,
         0,
         vim.schedule_wrap(function()

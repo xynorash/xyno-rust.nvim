@@ -504,33 +504,117 @@ describe("rust_restart: VimLeavePre kill of servers that never initialised", fun
     fresh_restart()
   end)
 
+  -- Real processes: a stub of server_pids() cannot show the ownership check. A "server" is `sleep`
+  -- under another name (a symlink called rust-analyzer / bacon-ls), as a child of this nvim.
+  local procs = {}
+  local function server_exe(name)
+    local dir = H.tmpdir()
+    local exe = dir .. "/" .. name
+    vim.uv.fs_symlink(vim.fn.exepath("sleep"), exe)
+    return exe
+  end
+  local function spawn(name)
+    local obj = vim.system({ server_exe(name), "60" })
+    procs[#procs + 1] = obj
+    -- (nvim reads the name from /proc: wait until the exec happened)
+    H.wait_for(function()
+      local p = vim.api.nvim_get_proc(obj.pid)
+      return p and p.name == name
+    end, 3000, name .. " process")
+    return obj
+  end
+  local function gone(obj)
+    return vim.wait(3000, function()
+      local st = io.open("/proc/" .. obj.pid .. "/stat")
+      if not st then
+        return true
+      end
+      local line = st:read("*l") or ""
+      st:close()
+      return line:match("^%d+ %b() (%a)") == "Z"
+    end, 20)
+  end
+  after_each(function()
+    for _, o in ipairs(procs) do
+      pcall(o.kill, o, 9)
+    end
+    procs = {}
+  end)
+
   it("stops the uninitialised clients and SIGKILLs this nvim's server children of that name; initialised ones are left", function()
+    H.need_posix("needs /proc and a sleep binary")
     local rr = require("xyno_rust.rust_restart")
-    local killed = {}
-    local orig_kill, orig_pids = vim.uv.kill, rr.server_pids
-    vim.uv.kill = function(pid, sig)
-      killed[#killed + 1] = { pid, sig }
-      return 0
-    end
-    rr.server_pids = function()
-      return { [111] = "rust-analyzer", [222] = "bacon-ls" }
-    end
+    local ra_proc, bacon_proc = spawn("rust-analyzer"), spawn("bacon-ls")
     local ra = fake_client(s, { name = "rust-analyzer" })
     local bc = fake_client(s, { name = "bacon_ls", root = H.tmpdir() })
     ra.initialized = false
     bc.initialized = true
     local ok, e = pcall(rr.kill_uninitialised)
-    vim.uv.kill, rr.server_pids = orig_kill, orig_pids
     H.ok(ok, tostring(e))
     H.eq(true, ra.stopped, "stopped with force")
     H.is_nil(bc.stopped)
-    H.eq({ { 111, "sigkill" } }, killed)
+    H.ok(gone(ra_proc), "the uninitialised rust-analyzer child was SIGKILLed")
+    H.eq(0, vim.uv.kill(bacon_proc.pid, 0), "the initialised bacon-ls child is still alive")
     -- and the exit of the stopped one is no crash to restart from
     rr.on_exit("rust-analyzer")(nil, 9, ra.id)
     vim.wait(700, function()
       return false
     end, 20)
     H.eq({}, s.ra_starts)
+  end)
+
+  it("kills a server only when it is a child of this nvim: a same-named process of someone else survives", function()
+    H.need_posix("needs /proc and a sleep binary")
+    local rr = require("xyno_rust.rust_restart")
+    local mine = spawn("rust-analyzer")
+    -- another nvim's server: same name, but its parent is not us (double fork through sh)
+    local exe = server_exe("rust-analyzer")
+    local out = vim.system({ "sh", "-c", ("%s 60 >/dev/null 2>&1 & echo $!"):format(vim.fn.shellescape(exe)) }):wait()
+    local foreign = tonumber(vim.trim(out.stdout))
+    H.ok(foreign and foreign > 0, "foreign pid")
+    H.wait_for(function()
+      local p = vim.api.nvim_get_proc(foreign)
+      return p and p.name == "rust-analyzer"
+    end, 3000, "foreign process")
+    H.not_ok(vim.api.nvim_get_proc(foreign).ppid == vim.uv.os_getpid(), "precondition: not our child")
+    -- the pid list names both (a stale/recycled pid looks exactly like this)
+    rr.kill_survivors({ [mine.pid] = "rust-analyzer", [foreign] = "rust-analyzer" }, 50)
+    H.ok(gone(mine), "our child was SIGKILLed")
+    vim.wait(300, function()
+      return false
+    end, 20)
+    H.eq(0, vim.uv.kill(foreign, 0), "the process that is not ours was left alone")
+    vim.uv.kill(foreign, 9)
+  end)
+
+  it("a recycled pid (same name, same parent, another process) is not killed: the start time must match", function()
+    H.need_posix("needs /proc and a sleep binary")
+    local rr = require("xyno_rust.rust_restart")
+    local first = spawn("rust-analyzer")
+    -- pretend the noted process was an earlier one: forge its start time
+    local orig_owned = rr._owned
+    H.ok(orig_owned(first.pid, "rust-analyzer", nil), "owned without a start time")
+    H.not_ok(orig_owned(first.pid, "rust-analyzer", 1), "a different start time is not the same process")
+    H.not_ok(orig_owned(first.pid, "bacon-ls", nil), "another executable name is not")
+  end)
+
+  it("with two same-named children and one uninitialised client only the newest child is killed", function()
+    H.need_posix("needs /proc and a sleep binary")
+    local rr = require("xyno_rust.rust_restart")
+    local old = spawn("rust-analyzer")
+    vim.wait(60, function()
+      return false
+    end, 10) -- (start times tick at 10 ms)
+    local new = spawn("rust-analyzer")
+    local a = fake_client(s, { name = "rust-analyzer" })
+    local b = fake_client(s, { name = "rust-analyzer" })
+    a.initialized, b.initialized = true, false
+    pcall(rr.kill_uninitialised)
+    H.ok(gone(new), "the newest was killed")
+    vim.wait(200, function()
+      return false
+    end, 20)
+    H.eq(0, vim.uv.kill(old.pid, 0), "the older (initialised) one is alive")
   end)
 
   it("VimLeavePre sends SIGCONT to this nvim's server children first (SIGSTOPped servers were orphaned at quit)", function()
@@ -619,6 +703,36 @@ describe("rust_restart: FocusGained refresh", function()
       return vim.tbl_contains(s.enabled, "bacon_ls")
     end, 3000, "bacon_ls enabled again")
     vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+
+  it("calling setup() again does not leak the debounce timers (uv timer handles stay constant)", function()
+    local rr = require("xyno_rust.rust_restart")
+    local function timers()
+      local n = 0
+      vim.uv.walk(function(h)
+        if h:get_type() == "timer" and not h:is_closing() then
+          n = n + 1
+        end
+      end)
+      return n
+    end
+    local d = repo()
+    local c = fake_client(s, { name = "bacon_ls", root = d })
+    attach(c)
+    local function cycle()
+      rr.setup()
+      focus()
+      rr.manifest_saved(d .. "/Cargo.toml")
+      settle(450)
+    end
+    cycle()
+    local after_first = timers()
+    for _ = 1, 8 do
+      cycle()
+    end
+    H.ok(timers() <= after_first, ("timer handles grew from %d to %d over 8 more setup() calls"):format(after_first, timers()))
+    rr.teardown()
+    H.ok(timers() <= after_first - 2, "teardown() closed the two debounce timers")
   end)
 
   it("with a client: sweeps, runs checktime, no restart when nothing changed; debounced to one run", function()
@@ -1073,7 +1187,7 @@ describe("lsp_status (fake clients)", function()
     for _, a in ipairs(vim.api.nvim_get_autocmds({ group = LS_GROUP })) do
       events[a.event] = true
     end
-    H.eq({ LspAttach = true, LspProgress = true, TextChanged = true, TextChangedI = true, BufWipeout = true }, events)
+    H.eq({ LspAttach = true, LspDetach = true, LspProgress = true, TextChanged = true, TextChangedI = true, BufWipeout = true }, events)
     local before = #vim.fn.timer_info()
     local b = scratch_buf()
     local c = ra_client(b, function() end)
@@ -1118,5 +1232,57 @@ describe("lsp_status (fake clients)", function()
     H.eq("RA detached", status.rust_analyzer(b))
     server_status(c, { health = "error", quiescent = true, message = "proc macro server crashed" })
     H.eq("RA error", status.rust_analyzer(b))
+  end)
+
+  it("a burst of progress events costs one redraw per loop turn, not one per event", function()
+    local b = scratch_buf()
+    local c = ra_client(b, function() end)
+    attach(c, b)
+    flush()
+    s.redraws = 0
+    for i = 1, 200 do
+      progress(c, "t", { kind = "report", title = "Indexing", percentage = i % 100 })
+    end
+    vim.wait(100, function()
+      return false
+    end, 10)
+    H.ok(s.redraws >= 1 and s.redraws <= 2, "redrawstatus calls for 200 events: " .. s.redraws)
+  end)
+
+  it("forgets the state of a client that is gone (restarts used to add one table each, for ever)", function()
+    local b = scratch_buf()
+    local before = status._state_size()
+    local gone = {}
+    for _ = 1, 5 do
+      local c = ra_client(b, function() end)
+      attach(c, b)
+      gone[#gone + 1] = c
+    end
+    H.ok(status._state_size() >= before + 5 - 1)
+    s.fakes = {} -- all five exited
+    local live = ra_client(b, function() end)
+    attach(live, b) -- the next attach prunes
+    H.ok(status._state_size() <= before + 1, ("state kept for dead clients: %d -> %d"):format(before, status._state_size()))
+  end)
+
+  it("deps_begin twice for one workspace replaces the timers instead of piling up two more", function()
+    local function timers()
+      local n = 0
+      vim.uv.walk(function(h)
+        if h:get_type() == "timer" and not h:is_closing() then
+          n = n + 1
+        end
+      end)
+      return n
+    end
+    local root = H.tmpdir()
+    status.deps_begin(root)
+    local one = timers()
+    for _ = 1, 10 do
+      status.deps_begin(root)
+    end
+    H.eq(one, timers(), "ten more saves, same number of timers")
+    status.deps_clear(root)
+    H.eq(one - 2, timers(), "clearing closes both")
   end)
 end)

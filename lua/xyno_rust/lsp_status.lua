@@ -59,10 +59,27 @@ local function count_edits(buf)
   })
 end
 
+-- rust-analyzer reports progress many times a second while indexing: one redraw per tick of
+-- the loop is enough however many events arrived in it.
+local redraw_pending = false
 local function redraw()
+  if redraw_pending then
+    return
+  end
+  redraw_pending = true
   vim.schedule(function()
+    redraw_pending = false
     vim.cmd.redrawstatus()
   end)
+end
+
+--- Forget the state of clients that no longer exist (it was kept for ever: one table per restart).
+local function prune()
+  for id in pairs(state) do
+    if not vim.lsp.get_client_by_id(id) then
+      state[id] = nil
+    end
+  end
 end
 
 --- "Indexing 42%" / "Fetching" for the newest progress item of a client.
@@ -153,11 +170,24 @@ local function ra_idle(root)
   return any
 end
 
---- Ends the pending resolution of `root` (all of them without argument).
+local function stop_timers(d)
+  for _, t in ipairs(d and d.timers or {}) do
+    if not t:is_closing() then
+      t:stop()
+      t:close()
+    end
+  end
+end
+
+--- Ends the pending resolution of `root` (all of them without argument) and closes its timers.
 function M.deps_clear(root)
   if root then
+    stop_timers(deps[root])
     deps[root] = nil
   else
+    for _, d in pairs(deps) do
+      stop_timers(d)
+    end
     deps = {}
   end
   redraw()
@@ -165,6 +195,8 @@ end
 
 --- A Cargo.toml/Cargo.lock under `root` was saved: show "deps resolving" until
 --- rust-analyzer has reloaded the workspace. Never sticks: see the header.
+--- (A second save in the same workspace replaces the first one's timers: a burst of saves used to
+--- leave two timers per save registered for up to 120 s.)
 ---@param root string workspace root
 ---@param buf integer? the manifest buffer (its wipe ends the wait)
 function M.deps_begin(root, buf)
@@ -175,16 +207,18 @@ function M.deps_begin(root, buf)
       busy = true -- already loading: its next quiescent=true is the end
     end
   end
-  deps[root] = { buf = buf, busy = busy, token = token }
+  stop_timers(deps[root])
+  local d = { buf = buf, busy = busy, token = token, timers = {} }
+  deps[root] = d
   local function alive()
     return deps[root] and deps[root].token == token
   end
-  vim.defer_fn(function()
+  d.timers[1] = vim.defer_fn(function()
     if alive() and not deps[root].busy and (ra_idle(root) or #vim.lsp.get_clients({ name = "rust-analyzer" }) == 0) then
       M.deps_clear(root)
     end
   end, DEPS_GRACE_MS)
-  vim.defer_fn(function()
+  d.timers[2] = vim.defer_fn(function()
     if alive() then
       M.deps_clear(root)
     end
@@ -229,12 +263,18 @@ function M.component()
   return table.concat(parts, " | ")
 end
 
+--- Number of clients with remembered state (for the health check and the specs).
+function M._state_size()
+  return vim.tbl_count(state)
+end
+
 function M.setup()
   local group = vim.api.nvim_create_augroup("xyno_rust_lsp_status", { clear = true })
 
   vim.api.nvim_create_autocmd("LspAttach", {
     group = group,
     callback = function(ev)
+      prune() -- a restart leaves the old client's state behind
       local client = vim.lsp.get_client_by_id(ev.data.client_id)
       if not client then
         return
@@ -282,9 +322,17 @@ function M.setup()
     end,
   })
 
+  vim.api.nvim_create_autocmd("LspDetach", {
+    group = group,
+    callback = function()
+      vim.schedule(prune) -- the client is dropped from the list a tick after the detach
+    end,
+  })
+
   vim.api.nvim_create_autocmd("BufWipeout", {
     group = group,
     callback = function(ev)
+      edits[ev.buf] = nil
       for root, d in pairs(deps) do
         if d.buf == ev.buf then
           M.deps_clear(root)

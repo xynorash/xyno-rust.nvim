@@ -2,8 +2,36 @@
 -- every module can also be required on its own (xyno_rust.rust_context, ...).
 local M = {}
 
+--- The contract other xyno plugins (xyno-new, xyno-imports, xyno-crates, xyno-macros) code against,
+--- as "major.minor". The major number changes when a module function they call is removed or changes
+--- meaning; the minor number when functions are added. `M.version` is the plugin release.
+---   1.0  the modules as they were extracted from xynovim
+---   1.1  async cargo layer (cargo.lua), trust.lua, rust_context.root_async / root(path, { nowait }),
+---        rust_routes.collect_async; every older function keeps its signature and result
+M.api_version = "1.1"
+M.version = "0.2.0"
+
+--- Whether this plugin satisfies a dependent's needs: `compatible("1.1")` is true for any 1.x with x >= 1.
+--- Returns false plus a one-line reason otherwise (a dependent prints it instead of failing later).
+---@param want string "major.minor"
+---@return boolean ok, string? why
+function M.compatible(want)
+  local wmaj, wmin = tostring(want):match("^(%d+)%.(%d+)$")
+  if not wmaj then
+    return false, ("xyno-rust: unreadable api version %q (want \"major.minor\")"):format(tostring(want))
+  end
+  local maj, min = M.api_version:match("^(%d+)%.(%d+)$")
+  if tonumber(wmaj) ~= tonumber(maj) then
+    return false, ("xyno-rust api %s is installed, API %s was asked for (another major version)"):format(M.api_version, want)
+  end
+  if tonumber(wmin) > tonumber(min) then
+    return false, ("xyno-rust api %s is installed, %s or newer is needed: update xyno-rust.nvim"):format(M.api_version, want)
+  end
+  return true
+end
+
 M.defaults = {
-  commands = true, -- :RustContext :RustTargets :RustTools :ActJob :RustNew :RustRoutes :RustRestart
+  commands = true, -- :RustContext :RustTargets :RustTools :ActJob :RustNew :RustRoutes :RustRestart :RustTrust
   keymaps = false, -- false | true | { context = lhs, targets = lhs, ... } (buffer-local in Rust files)
   modules = {
     context = true, -- xyno_rust.rust_context: per-project features / target
@@ -11,6 +39,7 @@ M.defaults = {
     routes = true, -- xyno_rust.rust_routes: HTTP route picker
     status = true, -- xyno_rust.lsp_status: readiness indicator (event driven)
     restart = true, -- xyno_rust.rust_restart: server supervision
+    trust = true, -- xyno_rust.trust: :RustTrust (the trust API works without it; this only defines the command)
   },
 }
 
@@ -85,6 +114,10 @@ function M.setup(opts)
   local m = opts.modules
   if m.context then
     require("xyno_rust.rust_context").setup(sub)
+    require("xyno_rust.rust_context").warm()
+  end
+  if m.trust then
+    require("xyno_rust.trust").setup(sub)
   end
   if m.tasks then
     require("xyno_rust.rust_tasks").setup(sub)
