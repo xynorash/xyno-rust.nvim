@@ -376,6 +376,7 @@ end
 
 local asking = {} -- root -> { cb ... } : one prompt per root at a time
 local ask_timers = {} -- root -> uv timer that gives up on a prompt nobody answers
+M.float_prompt = nil -- nil: the float when a UI is attached, vim.ui.select otherwise; true / false force one
 M.ask_timeout_ms = 300000 -- a prompt vim.ui.select never answers (a broken UI plugin) is dropped after this long
 
 local function drop_asking()
@@ -453,20 +454,16 @@ function M.ask(root, what, cb)
       end
     end)
   )
-  local ok, err = pcall(vim.ui.select, choices, {
-    prompt = ("Trust %s?\n%s can run code from it (build.rs, proc macros, tests, workflow steps)."):format(path, what)
-      .. (
-        drifted
-          and ("\nTrusted before, but changed since: %s%s"):format(
-            table.concat(vim.list_slice(drifted, 1, 6), ", "),
-            #drifted > 6 and (" and " .. (#drifted - 6) .. " more") or ""
-          )
-        or ""
-      ),
-    format_item = function(c)
-      return c[1]
-    end,
-  }, function(choice)
+  local body = ("Trust %s?\n%s can run code from it (build.rs, proc macros, tests, workflow steps)."):format(path, what)
+    .. (
+      drifted
+        and ("\nTrusted before, but changed since: %s%s"):format(
+          table.concat(vim.list_slice(drifted, 1, 6), ", "),
+          #drifted > 6 and (" and " .. (#drifted - 6) .. " more") or ""
+        )
+      or ""
+    )
+  local function answered(choice)
     local kind = choice and choice[2]
     if kind == "trust" or kind == "parent" then
       local tok, terr = pcall(M.trust, kind == "parent" and parent or path, { recursive = kind == "parent" })
@@ -476,7 +473,22 @@ function M.ask(root, what, cb)
       return finish(true)
     end
     finish(kind == "once")
-  end)
+  end
+  local ok, err
+  if M.float_prompt ~= false and (#vim.api.nvim_list_uis() > 0 or M.float_prompt == true) then
+    -- a wrapped float of our own: vim.ui.select shows the text as a one-line picker title (cut off on a
+    -- narrow terminal) and its input line left the editor in insert mode
+    ok, err = pcall(function()
+      require("xyno_rust.trust_prompt").open({ title = "Workspace trust", body = body, choices = choices }, answered)
+    end)
+  else
+    ok, err = pcall(vim.ui.select, choices, {
+      prompt = body,
+      format_item = function(c)
+        return c[1]
+      end,
+    }, answered)
+  end
   if not ok then
     if asking[path] ~= mine then
       error(err, 0) -- the prompt answered and a callback raised: that is the caller's error, not the prompt's
