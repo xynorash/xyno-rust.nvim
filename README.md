@@ -28,7 +28,7 @@ No other plugin is required. The profile entries of `:RustTargets` and the profi
   "xynorash/xyno-rust.nvim",
   dependencies = { "folke/snacks.nvim" }, -- pickers and terminals
   ft = "rust",
-  cmd = { "RustContext", "RustTargets", "RustRun", "RustRunLast", "RustTools", "RustRoutes", "RustNew", "RustRestart", "RustTrust", "ActJob" },
+  cmd = { "RustContext", "RustTargets", "RustRun", "RustRunLast", "RustRename", "RustUsages", "RustProfile", "TokioConsole", "RustTools", "RustRoutes", "RustNew", "RustRestart", "RustTrust", "ActJob" },
   opts = {},
   keys = {
     { "<leader>rF", "<cmd>RustContext<cr>", ft = "rust", desc = "Cargo features / target" },
@@ -93,6 +93,12 @@ No global keymap is set by default. `keymaps = true` maps these, buffer-local in
 | `:RustActions` / `:RustRefactor` | Code actions at the cursor or selection in a picker, each with the diff it would make as a preview (computed from the action's own edit, after `codeAction/resolve`); `:RustRefactor` lists only `refactor.*` (extract, inline, rewrite). The chosen action's edit is applied as plain text (snippet tab stops are dropped, their default text stays), then its command. |
 | `:RustFixAll` | Apply rust-analyzer's *preferred* quick fixes for the diagnostics of the buffer as one text edit (one undo step): rust-analyzer has no `source.fixAll`. Details below. |
 | `:RustRunLast` / `:RustRunEdit [name]` / `:RustRunDelete name` | Run the previous configuration again / edit or create one / delete one. |
+| `:RustRunShare name` | Copy a personal run configuration into `.xynovim/run.toml` (to commit it). See "Shared run configurations". |
+| `:RustRename [name]` | Rename with a preview: a picker of the files the rename touches, each with its diff; `<Tab>` unticks a file, `<CR>` applies the rest. A module rename lists its file move. |
+| `:RustUsages` | Usages of the symbol under the cursor in the whole workspace, grouped code / imports / tests / docs, with a summary in the title. |
+| `:RustProfile [file]` | In-editor profile view: hot functions and a foldable call tree from `perf script` output, collapsed stacks or `perf.data` (needs `perf`, trust-gated). `<CR>` folds or jumps to the source through workspace symbols. A run configuration with profiler `perf` records and converts. `samply`'s JSON is not read. |
+| `:TokioConsole [check \| address]` | Checks tokio / console-subscriber / `--cfg tokio_unstable` / the init call / the `tokio-console` binary, prints what is missing with the line to add, and launches `tokio-console` when all is there. A debug session in a `#[tokio::main]` file gets a one-time hint. A debugger shows threads, not tokio tasks. |
+| mouse click on a lens | Clicking rust-analyzer's "Run" / "Debug" lens line (virtual line above a function) runs that lens; other clicks are normal. Module `lens`. |
 | `:RustTools` | Pick a workspace tool: timings, bloat, machete, deny, audit, duplicate versions, coverage summary. |
 | `:RustRoutes` | Pick an axum / actix / rocket route and jump to it. |
 | `:RustNew [name]` | `cargo new` (bin or lib) in the current directory and open it. |
@@ -135,7 +141,11 @@ The reason for the care was measured: a quick-fix request for a stale diagnostic
 
 A run configuration is a named, saved `cargo run --bin x -- args` with environment variables, the JetBrains idea without the dialog. It is data, not a shell line: `cargo_args` and `args` are split into words (quotes group, a backslash escapes; nothing is expanded, so `$HOME`, backticks and `;` stay literal arguments), the words become one argv list for the terminal, and the program's arguments follow `--`. A configuration can therefore run nothing but `cargo` (or `samply` / `cargo flamegraph` when a profiler is set) with what you typed. The `:RustContext` features are added unless the cargo arguments name `--features`, `-F`, `--all-features` or `--no-default-features` themselves.
 
-They are stored in `stdpath("state")/xyno-rust-run-configs.json`, keyed by workspace root, and never read from the project: a repository cannot ship a configuration that runs on your machine. Running one asks for workspace trust once, like `:RustTargets`. Profilers (`samply`, `cargo flamegraph`) need a binary run; `samply` builds the `profiling` profile and records `target/profiling/<bin>`, with the program's arguments passed as separate arguments to `samply record`.
+Personal ones are stored in `stdpath("state")/xyno-rust-run-configs.json`, keyed by workspace root. Running one asks for workspace trust once, like `:RustTargets`. Profilers (`samply`, `cargo flamegraph`) need a binary run; `samply` builds the `profiling` profile and records `target/profiling/<bin>`, with the program's arguments passed as separate arguments to `samply record`.
+
+## Shared run configurations
+
+Opt-in, twice: `<root>/.xynovim/run.toml` must exist, and the workspace must be trusted (`:RustTrust`) before one of its entries is even listed (an untrusted workspace gets one line saying how many there are). The file holds `[[run]]` tables with the same fields (`name`, `cmd`, `package`, `bin` / `example` / `test` / `bench` / `lib`, `cargo_args`, `args`, `profiler`, `env = { K = "v" }`). They are merged with the personal ones (a personal one with the same name wins), are read-only in the picker, and go through the same sanitizing and argv splitting, so the file can run nothing but cargo (or the profilers). The workspace fingerprint of the trust store includes the file: a `git pull` that changes it asks again. The reader understands a small TOML subset and rejects the rest with a line number. `:RustRunShare name` writes a personal configuration into the file.
 
 ## Nothing waits on a process
 

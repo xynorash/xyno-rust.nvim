@@ -133,10 +133,27 @@ nothing. Calling it again replaces the autocommands.
                         are split into words and passed as an argv list;
                         nothing is expanded or run through a shell line.
                         Stored in stdpath("state")/xyno-rust-run-configs.json,
-                        never read from the project. Asks for workspace trust.
+                        Shared entries: <root>/.xynovim/run.toml, read only in a
+                        trusted workspace. Asks for workspace trust.
 :RustRunLast            Run the previous configuration again.
 :RustRunEdit [name]     Edit (or create) a configuration.
 :RustRunDelete {name}   Delete a configuration.
+:RustRunShare {name}    Copy a configuration into .xynovim/run.toml.
+
+                                                                  *:RustRename*
+:RustRename [name]      Rename with a per-file diff preview; <Tab> unticks a
+                        file, <CR> applies the rest.
+
+                                                                  *:RustUsages*
+:RustUsages             Workspace usages grouped code/import/tests/docs.
+
+                                                                 *:RustProfile*
+:RustProfile [file]     Hot functions and call tree of a perf script, collapsed
+                        stacks or perf.data. <CR> folds / jumps, E/C expand/
+                        collapse all, t toggles the hot list, q closes.
+
+                                                                *:TokioConsole*
+:TokioConsole [check]   Check the project for tokio-console and launch it.
 
                                                                     *:RustTools*
 :RustTools              Pick a workspace tool: timings, bloat, machete, deny,
