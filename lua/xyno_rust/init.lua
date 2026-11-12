@@ -179,17 +179,37 @@ function M.setup(opts)
   if m.runs then
     require("xyno_rust.run_configs").setup(sub)
   end
-  if m.profile then
-    require("xyno_rust.profiler").setup(sub)
+  -- the four newest modules are not required at startup: only their commands / FileType hook exist until used
+  if m.profile and opts.commands then
+    vim.api.nvim_create_user_command("RustProfile", function(a)
+      require("xyno_rust.profiler").command(a.args)
+    end, { nargs = "?", complete = "file", desc = "In-editor profile view (perf script / collapsed stacks / perf.data)" })
   end
-  if m.tokio then
-    require("xyno_rust.tokio").setup(sub)
+  if m.tokio and opts.commands then
+    vim.api.nvim_create_user_command("TokioConsole", function(a)
+      require("xyno_rust.tokio").command(a.args)
+    end, { nargs = "?", complete = function() return { "check" } end, desc = "tokio-console: project check, then launch" })
   end
-  if m.rename then
-    require("xyno_rust.rename_preview").setup(sub)
+  if m.rename and opts.commands then
+    vim.api.nvim_create_user_command("RustRename", function(a)
+      require("xyno_rust.rename_preview").rename(a.args)
+    end, { nargs = "?", desc = "Rename with a per-file diff preview (untick files, then apply)" })
   end
   if m.lens then
-    require("xyno_rust.lens_click").setup(sub)
+    vim.api.nvim_create_autocmd("FileType", {
+      group = vim.api.nvim_create_augroup("xyno_rust_lens_click", { clear = true }),
+      pattern = "rust",
+      callback = function(ev)
+        vim.keymap.set("n", "<LeftMouse>", function()
+          return require("xyno_rust.lens_click").click()
+        end, { buffer = ev.buf, expr = true, replace_keycodes = true, desc = "Click a code lens (Run / Debug); otherwise a normal click" })
+      end,
+    })
+    for _, b in ipairs(vim.api.nvim_list_bufs()) do
+      if vim.api.nvim_buf_is_loaded(b) and vim.bo[b].filetype == "rust" then
+        vim.api.nvim_exec_autocmds("FileType", { group = "xyno_rust_lens_click", buffer = b })
+      end
+    end
   end
   if m.routes then
     require("xyno_rust.rust_routes").setup(sub)
