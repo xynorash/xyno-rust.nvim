@@ -66,7 +66,11 @@ describe("cargo.locate_async negative caching", function()
 
   it("'could not find Cargo.toml' IS remembered (no new cargo run), but only for a short time", function()
     local dir = H.tmpdir()
-    local n = count_exec({ code = 101, stdout = "", stderr = "error: could not find `Cargo.toml` in `/x` or any parent directory" })
+    local n = count_exec({
+      code = 101,
+      stdout = "",
+      stderr = "error: could not find `Cargo.toml` in `/x` or any parent directory",
+    })
     H.is_nil(locate(dir, "t3"))
     H.eq(false, cargo.located(dir, "t3"))
     H.is_nil(locate(dir, "t3"))
@@ -243,8 +247,15 @@ describe("statefile lock", function()
     local here = vim.fs.dirname(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2)))
     local procs = {}
     for i = 1, 6 do
-      local code = ([[vim.opt.rtp:prepend(%q); local s=require('xyno_rust.statefile'); for j=1,25 do s.update(%q, function(a) a['k%d_'..j]=j end) end]]):format(here, file, i)
-      procs[i] = vim.system({ vim.v.progpath, "--headless", "-u", "NONE", "-i", "NONE", "+lua " .. code, "+qa!" }, { text = true })
+      local code = ([[vim.opt.rtp:prepend(%q); local s=require('xyno_rust.statefile'); for j=1,25 do s.update(%q, function(a) a['k%d_'..j]=j end) end]]):format(
+        here,
+        file,
+        i
+      )
+      procs[i] = vim.system(
+        { vim.v.progpath, "--headless", "-u", "NONE", "-i", "NONE", "+lua " .. code, "+qa!" },
+        { text = true }
+      )
     end
     for _, p in ipairs(procs) do
       p:wait(60000)
