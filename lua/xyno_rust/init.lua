@@ -46,6 +46,7 @@ M.defaults = {
     profile = true, -- xyno_rust.profiler: :RustProfile (in-editor hot functions / call tree)
     tokio = true, -- xyno_rust.tokio: :TokioConsole (project check, launch), the async debugging hint
     rename = true, -- xyno_rust.rename_preview: :RustRename (per-file diff preview before applying)
+    lens = true, -- xyno_rust.lens_click: a mouse click on a rust-analyzer code lens (Run / Debug) runs it
     trust = true, -- xyno_rust.trust: :RustTrust (the trust API works without it; this only defines the command)
   },
   tools = {}, -- :RustTools list: { hide = { "audit", ... }, extra = { { text = "...", cmd = { "cargo", ... }, flags = false } } }
@@ -179,6 +180,9 @@ function M.setup(opts)
   end
   if m.rename then
     require("xyno_rust.rename_preview").setup(sub)
+  end
+  if m.lens then
+    require("xyno_rust.lens_click").setup(sub)
   end
   if m.routes then
     require("xyno_rust.rust_routes").setup(sub)
