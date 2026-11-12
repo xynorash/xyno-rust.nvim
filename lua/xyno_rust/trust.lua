@@ -36,7 +36,7 @@
 --   trust.revoke(root) / trust.revoke_all()
 --   trust.list()                         -> { { root, recursive, at } ... } sorted by root
 --   trust.drift(root)                    -> nil, or the files whose content differs from what was trusted (api 1.3)
---   trust.rehash(root)                   -> boolean: record the current content for root's own entry (api 1.3)
+--   trust.rehash(root, saved?)           -> boolean: record the current content of root's own entry (only `saved` may differ) (api 1.3)
 --   trust.fingerprint(root)              -> { hash, files = { [rel|abs path] = short hash }, truncated? } (api 1.3)
 --   trust.ra_overrides(root)             -> rust-analyzer settings table ({} for a trusted workspace)
 local M = {}
@@ -242,19 +242,31 @@ function M.drift(root)
   return #names > 0 and names or { "(content)" }
 end
 
---- Record the current content for the entry of `root` itself. Returns whether there was one.
---- Called for edits made inside nvim so that they are not asked about.
-function M.rehash(root)
+--- Record the current content for the entry of `root` itself. Returns whether it was recorded.
+--- With `saved` (an edit made inside nvim: the path that was saved) only that file may differ from what
+--- was trusted: if something else changed too (a pulled build.rs next to the Cargo.toml you just
+--- saved), nothing is recorded and the workspace stays untrusted.
+function M.rehash(root, saved)
   local path = M.normalize(root)
-  if not path or not entries()[path] or entries()[path].recursive then
+  local e = path and entries()[path]
+  if not e or e.recursive then
     return false
   end
   local f = M.fingerprint(path)
+  if saved and e.files then
+    local only = vim.fs.normalize(vim.uv.fs_realpath(saved) or saved)
+    for _, name in ipairs(changed_files(e.files, f.files)) do
+      local full = name:sub(1, 1) == "/" and name or (path .. "/" .. name)
+      if vim.fs.normalize(vim.uv.fs_realpath(full) or full) ~= only then
+        return false
+      end
+    end
+  end
   local had = false
   require("xyno_rust.statefile").update(file(), function(all)
-    local e = all[path]
-    if type(e) == "table" and not e.recursive then
-      e.hash, e.files = f.hash, f.files
+    local cur = all[path]
+    if type(cur) == "table" and not cur.recursive then
+      cur.hash, cur.files = f.hash, f.files
       had = true
     end
   end)
@@ -308,6 +320,19 @@ function M.list()
 end
 
 local asking = {} -- root -> { cb ... } : one prompt per root at a time
+local ask_timers = {} -- root -> uv timer that gives up on a prompt nobody answers
+M.ask_timeout_ms = 300000 -- a prompt vim.ui.select never answers (a broken UI plugin) is dropped after this long
+
+local function drop_asking()
+  for path, t in pairs(ask_timers) do
+    pcall(function()
+      t:stop()
+      t:close()
+    end)
+    ask_timers[path] = nil
+  end
+  asking = {}
+end
 
 --- Ask whether to trust `root` for `what` (a short description of the action).
 --- cb(true) after "trust" or "run once", cb(false) otherwise. Nothing is stored
@@ -333,14 +358,40 @@ function M.ask(root, what, cb)
   if parent == path or parent == "." then
     table.remove(choices, 2)
   end
+  local mine = asking[path] -- a late answer of a prompt that already timed out must not touch a newer one
   local function finish(answer)
-    local waiting = asking[path]
+    if asking[path] ~= mine then
+      return
+    end
     asking[path] = nil
-    for _, f in ipairs(waiting) do
-      f(answer)
+    local t = ask_timers[path]
+    if t then
+      ask_timers[path] = nil
+      pcall(function()
+        t:stop()
+        t:close()
+      end)
+    end
+    for _, f in ipairs(mine) do
+      pcall(f, answer)
     end
   end
-  vim.ui.select(choices, {
+  if not M._leave_hooked then
+    M._leave_hooked = true
+    vim.api.nvim_create_autocmd("VimLeavePre", {
+      group = vim.api.nvim_create_augroup("xyno_rust_trust_ask", { clear = true }),
+      callback = drop_asking, -- no callbacks at exit: the refusal would only notify into a closing UI
+    })
+  end
+  local timer = vim.uv.new_timer()
+  ask_timers[path] = timer
+  timer:start(M.ask_timeout_ms, 0, vim.schedule_wrap(function()
+    if asking[path] == mine then
+      vim.notify(("xyno-rust: the trust prompt for %s got no answer and was dropped (treated as 'do not run')"):format(path), vim.log.levels.WARN)
+      finish(false)
+    end
+  end))
+  local ok, err = pcall(vim.ui.select, choices, {
     prompt = ("Trust %s?\n%s can run code from it (build.rs, proc macros, tests, workflow steps)."):format(path, what)
       .. (drifted and ("\nTrusted before, but changed since: %s%s"):format(table.concat(vim.list_slice(drifted, 1, 6), ", "), #drifted > 6 and (" and " .. (#drifted - 6) .. " more") or "") or ""),
     format_item = function(c)
@@ -349,14 +400,18 @@ function M.ask(root, what, cb)
   }, function(choice)
     local kind = choice and choice[2]
     if kind == "trust" or kind == "parent" then
-      local ok, err = pcall(M.trust, kind == "parent" and parent or path, { recursive = kind == "parent" })
-      if not ok then
-        vim.notify("xyno-rust: could not remember the choice: " .. tostring(err), vim.log.levels.WARN)
+      local tok, terr = pcall(M.trust, kind == "parent" and parent or path, { recursive = kind == "parent" })
+      if not tok then
+        vim.notify("xyno-rust: could not remember the choice: " .. tostring(terr), vim.log.levels.WARN)
       end
       return finish(true)
     end
     finish(kind == "once")
   end)
+  if not ok then
+    vim.notify("xyno-rust: the trust prompt failed: " .. tostring(err), vim.log.levels.WARN)
+    finish(false)
+  end
 end
 
 --- cb(true) when `root` is trusted or the user agrees; cb(false) otherwise (a refusal is notified).

@@ -21,6 +21,8 @@ local M = {}
 M.config = {
   metadata_timeout_ms = 30000, -- was an unconditional blocking wait of the same length
   locate_timeout_ms = 5000,
+  locate_retry_ms = 3000, -- after a transient failure the blocking locate() does not wait again for this long
+  locate_negative_ttl_ms = 30000, -- how long "no Cargo.toml here" is believed (a transient failure is never kept)
   targets_timeout_ms = 10000,
   targets_ttl_ms = 60000, -- the installed rustup targets change when the user runs `rustup target add`
   wait_ms = 2000, -- the longest a synchronous wrapper blocks (cold cache only)
@@ -186,22 +188,38 @@ end
 
 -- ----------------------------------------------------------------- locate
 
-local located = {} -- dir -> { stamp, root = string|false }
+local located = {} -- dir -> { stamp, root = string|false, at = ms }
+local located_failed = {} -- dir -> { stamp, at = ms }: the last locate failed for a reason that may pass
+
+--- The cache entry of `dir` when it is still good: same stamp, and a "no answer" (root = false) not older
+--- than locate_negative_ttl_ms.
+local function located_hit(dir, stamp)
+  local hit = located[dir]
+  if hit and hit.stamp == stamp then
+    if hit.root == false and now_ms() - (hit.at or 0) > M.config.locate_negative_ttl_ms then
+      return nil
+    end
+    return hit
+  end
+end
 
 --- Cargo's own answer for the workspace of `dir` (`cargo locate-project
 --- --workspace`): knows `members` and `exclude`. Cached per directory and
---- `stamp` (the modification times of the manifests it depends on).
+--- `stamp` (the modification times of the manifests it depends on). Only a
+--- definitive answer is kept: a root, or cargo saying there is no Cargo.toml
+--- (that one for locate_negative_ttl_ms). A timeout, a spawn failure, a toolchain
+--- that is still downloading or any other error is not cached, so the next ask retries.
 --- cb(root) with root = nil when cargo cannot answer (no cargo, a manifest that
 --- does not parse). Always asynchronous.
 function M.locate_async(dir, stamp, cb)
-  local hit = located[dir]
-  if hit and hit.stamp == stamp then
+  local hit = located_hit(dir, stamp)
+  if hit then
     return vim.schedule(function()
       cb(hit.root or nil)
     end)
   end
   if vim.fn.executable("cargo") ~= 1 then
-    located[dir] = { stamp = stamp, root = false }
+    located[dir] = { stamp = stamp, root = false, at = now_ms() }
     return vim.schedule(function()
       cb(nil)
     end)
@@ -210,7 +228,14 @@ function M.locate_async(dir, stamp, cb)
     M.exec({ "cargo", "locate-project", "--workspace", "--message-format", "plain" }, { cwd = dir, timeout = M.config.locate_timeout_ms }, function(r)
       local manifest = r.code == 0 and vim.trim(r.stdout) or ""
       local root = manifest:match("Cargo%.toml$") and vim.fs.dirname(manifest) or false
-      located[dir] = { stamp = stamp, root = root }
+      local definitive = root or (r.code == 101 or r.code == 1) and (r.stderr or ""):find("could not find `Cargo.toml`", 1, true)
+      if definitive then
+        located[dir] = { stamp = stamp, root = root, at = now_ms() }
+        located_failed[dir] = nil
+      else
+        located[dir] = nil
+        located_failed[dir] = { stamp = stamp, at = now_ms() }
+      end
       done(root or nil)
     end)
   end)
@@ -218,8 +243,8 @@ end
 
 --- The cached answer of locate_async: root (string), false (cargo has no answer) or nil (unknown yet).
 function M.located(dir, stamp)
-  local hit = located[dir]
-  if hit and hit.stamp == stamp then
+  local hit = located_hit(dir, stamp)
+  if hit then
     return hit.root
   end
 end
@@ -234,6 +259,10 @@ function M.locate(dir, stamp)
   M.locate_async(dir, stamp, function(r)
     finished, root = true, r
   end)
+  local failed = located_failed[dir]
+  if failed and failed.stamp == stamp and now_ms() - failed.at < M.config.locate_retry_ms then
+    return nil -- it just failed (timeout, toolchain download): retry in the background, do not stall again
+  end
   block(function()
     return finished
   end)
