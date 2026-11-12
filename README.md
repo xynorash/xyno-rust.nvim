@@ -109,7 +109,7 @@ Every module can be required on its own. `:help xyno-rust-api` has the signature
 | --- | --- |
 | `xyno_rust` | `setup(opts)`, `defaults`, `default_keymaps`, `api_version`, `version`, `compatible(want)` |
 | `xyno_rust.cargo` | `metadata_async(root, cb, opts?)`, `metadata(root, opts?)`, `locate_async`, `locate`, `installed_targets_async(cb)`, `exec(argv, opts, cb)`, `invalidate(root?)`, `reset_caches()`, `pending()`, `config` |
-| `xyno_rust.trust` | `is_trusted(root)`, `require(root, what, cb)`, `ask`, `trust(root, opts?)`, `revoke(root)`, `revoke_all()`, `list()`, `ra_overrides(root)`, `normalize(path)`, `file()` |
+| `xyno_rust.trust` | `is_trusted(root)`, `require(root, what, cb)`, `ask`, `trust(root, opts?)`, `revoke(root)`, `revoke_all()`, `list()`, `drift(root)`, `rehash(root)`, `fingerprint(root)`, `ra_overrides(root)`, `normalize(path)`, `file()` |
 | `xyno_rust.fsutil` | `rename(tmp, dest)`, `slash(path)` |
 | `xyno_rust.rust_context` | `root(path?, opts?)`, `root_async(path, cb)`, `warm()`, `get(root)`, `apply(root, ctx?)`, `pick()`, `reset()`, `describe(ctx?)`, `ra_cargo(ctx?)`, `cargo_flags(ctx?)`, `bacon_args(ctx?)`, `canon(path)`, `valid_feature(name)`, `valid_target(triple)`, `sanitize(ctx)` |
 | `xyno_rust.rust_tasks` | `targets()`, `tools()`, `new(name?)`, `act_job()`, `doctests()`, `samply_cmd(build, bin)`, `target_items(root, meta)` |
@@ -160,6 +160,8 @@ Running a target, a test, a bench, a doctest, `samply`, `cargo flamegraph`, any 
 - `:RustTrust` lists, adds and revokes entries; `:checkhealth xyno-rust` shows them and whether the current workspace is trusted
 - the entry is the workspace root as reported by cargo, with symlinks resolved; a sibling directory with the same prefix is not covered, and a path *below* a trusted root is not either (only an "everything under" entry covers what is below it)
 
+- **Trust follows the content.** An entry of its own stores a fingerprint of every `Cargo.toml` and `build.rs` below the root (target/, .git/, node_modules skipped; at most 400 files, 6 levels), the `.cargo/config(.toml)` and `rust-toolchain(.toml)` files of the tree and of its parent directories. If any differs later (a `git pull`, another branch, a tool that edited them), the workspace is untrusted again and the next action asks once more, naming the changed files. `.rs` sources and `Cargo.lock` are not part of it, so ordinary work never asks; a config can call `trust.rehash(root)` for edits made in the editor itself. This is direnv's model (it re-asks after `.envrc` changes); VS Code asks once per folder and never again. "Trust everything under <parent>" is one explicit decision about a tree and keeps no fingerprint. Entries stored before this existed take the current content the first time they are looked at.
+
 What does not need trust: reading `cargo metadata --no-deps` and `cargo locate-project` (what the pickers and the root lookup use). Checked with a workspace that has a `build.rs` and a `.cargo/config.toml` setting `rustc`, `rustc-wrapper` and `rustc-workspace-wrapper` to a logging script: neither command ran any of them, while `cargo check` on the same workspace did (the control in `tests/trust_spec.lua`).
 
 A resolving `cargo metadata` (without `--no-deps`, which `xyno_rust.crate_meta` needs for the dependency graph) does run the configured rustc wrapper; the same check showed it. So in a workspace that is not trusted `crate_meta` overrides those settings through the environment (`RUSTC`, `RUSTC_WRAPPER`, `RUSTC_WORKSPACE_WRAPPER`) and does not retry online after the offline run failed (the error says `:RustTrust add`). If you rely on xyno-crates / xyno-imports / xyno-macros needing the network in a project, trust it once.
@@ -179,7 +181,7 @@ Limits: the plugin does not start rust-analyzer or bacon-ls, so it cannot stop t
 
 ## Compatibility contract
 
-`require("xyno_rust").api_version` is `"major.minor"` (now `"1.2"`; `version` is the plugin release). The major number changes when a function the other xyno plugins call is removed or changes meaning, the minor number when functions are added. A dependent checks it once:
+`require("xyno_rust").api_version` is `"major.minor"` (now `"1.3"`; `version` is the plugin release). The major number changes when a function the other xyno plugins call is removed or changes meaning, the minor number when functions are added. A dependent checks it once:
 
 ```lua
 local ok, why = require("xyno_rust").compatible("1.1")
