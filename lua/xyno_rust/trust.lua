@@ -104,7 +104,8 @@ function M.fingerprint(root)
       end
       local relname = rel == "" and name or (rel .. "/" .. name)
       if kind == "file" then
-        if WATCHED[name] or ((name == "config" or name == "config.toml") and vim.fs.basename(dir) == ".cargo") then
+        if WATCHED[name] or ((name == "config" or name == "config.toml") and vim.fs.basename(dir) == ".cargo")
+          or (name == "run.toml" and vim.fs.basename(dir) == ".xynovim") then
           add(relname, dir .. "/" .. name)
         end
       elseif kind == "directory" and not SKIP_DIR[name] and depth < MAX_DEPTH then

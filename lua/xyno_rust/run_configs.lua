@@ -285,6 +285,7 @@ function M.share(root, name)
   local path = M.shared_file(root)
   local entries = {}
   local sh = M.load_shared(root)
+  local was_trusted = require("xyno_rust.trust").is_trusted(root)
   if sh.exists and sh.err then
     return nil, sh.err .. " (fix the file first)"
   end
@@ -310,6 +311,10 @@ function M.share(root, name)
   end
   fd:write(M.to_toml(entries))
   fd:close()
+  -- the workspace fingerprint includes this file: our own write must not make the workspace look changed
+  if was_trusted then
+    require("xyno_rust.trust").rehash(root, path)
+  end
   return true
 end
 
