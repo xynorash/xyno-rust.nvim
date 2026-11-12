@@ -17,12 +17,27 @@
 --     settings that keep an untrusted workspace from running build scripts and
 --     proc macros, for a config to merge in. Nothing applies it by default.
 --
+-- Trust follows the content that runs code. A trust entry of its own (not "everything under <parent>")
+-- stores a fingerprint of what cargo executes or obeys in that workspace: every Cargo.toml and build.rs
+-- below the root, .cargo/config(.toml) and rust-toolchain(.toml) in the tree and in the parent
+-- directories (cargo and rustup read those upward). When the content differs (a `git pull`, a checkout
+-- of another branch, an unseen edit by another tool) the workspace is untrusted again and the next
+-- action asks once more, naming the files. Not part of it: .rs sources, Cargo.lock, target/, .git/
+-- (ordinary edits and a lockfile refresh never ask). Edits made inside nvim call `rehash`, so the
+-- editor's own saves are not re-asked. direnv works this way (re-asks after .envrc changes); VS Code's
+-- Workspace Trust asks once per folder and never again, which is why a pulled build.rs runs there
+-- unannounced. "Trust everything under <parent>" is one explicit decision about a whole tree and keeps
+-- no fingerprint.
+--
 -- API for other plugins (stable within api_version 1.x, see xyno_rust.api_version):
 --   trust.is_trusted(root)               -> boolean, trusted_by_root?
 --   trust.require(root, what, cb)        cb(true|false); asks once if needed; may call cb before it returns
 --   trust.trust(root, { recursive? })    remember (recursive: everything below root)
 --   trust.revoke(root) / trust.revoke_all()
 --   trust.list()                         -> { { root, recursive, at } ... } sorted by root
+--   trust.drift(root)                    -> nil, or the files whose content differs from what was trusted (api 1.3)
+--   trust.rehash(root)                   -> boolean: record the current content for root's own entry (api 1.3)
+--   trust.fingerprint(root)              -> { hash, files = { [rel|abs path] = short hash }, truncated? } (api 1.3)
 --   trust.ra_overrides(root)             -> rust-analyzer settings table ({} for a trusted workspace)
 local M = {}
 
@@ -43,11 +58,123 @@ function M.normalize(root)
   return real ~= "" and real or "/"
 end
 
+
+-- ------------------------------------------------------------ fingerprint
+
+local SKIP_DIR = { target = true, [".git"] = true, [".hg"] = true, [".svn"] = true, node_modules = true }
+local WATCHED = { ["Cargo.toml"] = true, ["build.rs"] = true, ["rust-toolchain"] = true, ["rust-toolchain.toml"] = true }
+local MAX_FILES, MAX_DEPTH, MAX_BYTES = 400, 6, 1024 * 1024
+
+local function digest(path)
+  local f = io.open(path, "rb")
+  if not f then
+    return nil
+  end
+  local text = f:read(MAX_BYTES) or ""
+  f:close()
+  return vim.fn.sha256(text)
+end
+
+--- What cargo executes or obeys under `root`: { hash = combined, files = { [name] = first 12 hex digits } }.
+--- Names are relative to root, or absolute for files in parent directories.
+function M.fingerprint(root)
+  local path = M.normalize(root)
+  local files, n, truncated = {}, 0, false
+  local function add(name, full)
+    if n >= MAX_FILES then
+      truncated = true
+      return
+    end
+    local d = digest(full)
+    if d then
+      n = n + 1
+      files[name] = d:sub(1, 12)
+    end
+  end
+  local function walk(dir, rel, depth)
+    local handle = vim.uv.fs_scandir(dir)
+    if not handle then
+      return
+    end
+    local sub = {}
+    while true do
+      local name, kind = vim.uv.fs_scandir_next(handle)
+      if not name then
+        break
+      end
+      local relname = rel == "" and name or (rel .. "/" .. name)
+      if kind == "file" then
+        if WATCHED[name] or ((name == "config" or name == "config.toml") and vim.fs.basename(dir) == ".cargo") then
+          add(relname, dir .. "/" .. name)
+        end
+      elseif kind == "directory" and not SKIP_DIR[name] and depth < MAX_DEPTH then
+        sub[#sub + 1] = { dir .. "/" .. name, relname }
+      end
+    end
+    table.sort(sub, function(a, b)
+      return a[2] < b[2]
+    end)
+    for _, d in ipairs(sub) do
+      walk(d[1], d[2], depth + 1)
+    end
+  end
+  if path then
+    walk(path, "", 0)
+    -- cargo reads .cargo/config(.toml) and rustup rust-toolchain(.toml) of every parent directory
+    local dir = vim.fs.dirname(path)
+    local guard = 0
+    while dir and dir ~= "" and guard < 64 do
+      guard = guard + 1
+      for _, name in ipairs({ ".cargo/config", ".cargo/config.toml", "rust-toolchain", "rust-toolchain.toml" }) do
+        add(dir == "/" and ("/" .. name) or (dir .. "/" .. name), (dir == "/" and "" or dir) .. "/" .. name)
+      end
+      local up = vim.fs.dirname(dir)
+      if up == dir then
+        break
+      end
+      dir = up
+    end
+  end
+  local names = vim.tbl_keys(files)
+  table.sort(names)
+  local parts = {}
+  for _, name in ipairs(names) do
+    parts[#parts + 1] = name .. "\0" .. files[name]
+  end
+  return { hash = vim.fn.sha256(table.concat(parts, "\n")), files = files, truncated = truncated or nil }
+end
+
+local function changed_files(old, new)
+  local out = {}
+  for name, h in pairs(new) do
+    if old[name] ~= h then
+      out[#out + 1] = name
+    end
+  end
+  for name in pairs(old) do
+    if new[name] == nil then
+      out[#out + 1] = name
+    end
+  end
+  table.sort(out)
+  return out
+end
+
+local function entry_of(path)
+  local e = require("xyno_rust.statefile").read(file())[path]
+  return type(e) == "table" and e or nil
+end
+
 local function entries()
   local out = {}
   for root, e in pairs(require("xyno_rust.statefile").read(file())) do
     if type(root) == "string" and type(e) == "table" then
-      out[root] = { recursive = e.recursive == true, at = tonumber(e.at) or 0 }
+      out[root] = {
+        recursive = e.recursive == true,
+        at = tonumber(e.at) or 0,
+        hash = type(e.hash) == "string" and e.hash or nil,
+        files = type(e.files) == "table" and e.files or nil,
+      }
     end
   end
   return out
@@ -60,14 +187,36 @@ local function inside(path, dir)
   return path == dir or path:sub(1, #dir + 1) == dir .. "/"
 end
 
+--- The entry of `path` itself is trusted only while the content it was trusted for is unchanged.
+--- An entry without a fingerprint (stored by an older version) takes the current one on first sight.
+local function entry_current(path, e)
+  if e.recursive then
+    return true
+  end
+  if not e.hash then
+    pcall(function()
+      local f = M.fingerprint(path)
+      require("xyno_rust.statefile").update(file(), function(all)
+        if type(all[path]) == "table" and not all[path].hash then
+          all[path].hash, all[path].files = f.hash, f.files
+        end
+      end)
+    end)
+    return true
+  end
+  return M.fingerprint(path).hash == e.hash
+end
+
 --- Whether `root` (a workspace root or any path in it) is trusted. Second result: the entry that trusts it.
+--- A workspace whose manifests / build scripts / cargo config / toolchain changed since it was trusted is
+--- not (see the header; `drift` names the files).
 function M.is_trusted(root)
   local path = M.normalize(root)
   if not path then
     return false
   end
   local all = entries()
-  if all[path] then
+  if all[path] and entry_current(path, all[path]) then
     return true, path
   end
   for dir, e in pairs(all) do
@@ -78,11 +227,50 @@ function M.is_trusted(root)
   return false
 end
 
+--- nil when `root` has no entry of its own or nothing changed; else the names of the changed files.
+function M.drift(root)
+  local path = M.normalize(root)
+  local e = path and entries()[path]
+  if not e or e.recursive or not e.hash then
+    return nil
+  end
+  local f = M.fingerprint(path)
+  if f.hash == e.hash then
+    return nil
+  end
+  local names = e.files and changed_files(e.files, f.files) or {}
+  return #names > 0 and names or { "(content)" }
+end
+
+--- Record the current content for the entry of `root` itself. Returns whether there was one.
+--- Called for edits made inside nvim so that they are not asked about.
+function M.rehash(root)
+  local path = M.normalize(root)
+  if not path or not entries()[path] or entries()[path].recursive then
+    return false
+  end
+  local f = M.fingerprint(path)
+  local had = false
+  require("xyno_rust.statefile").update(file(), function(all)
+    local e = all[path]
+    if type(e) == "table" and not e.recursive then
+      e.hash, e.files = f.hash, f.files
+      had = true
+    end
+  end)
+  return had
+end
+
 function M.trust(root, opts)
   local path = M.normalize(root)
   assert(path, "trust.trust: a directory is required")
+  local fp = not (opts and opts.recursive) and M.fingerprint(path) or nil
   require("xyno_rust.statefile").update(file(), function(all)
-    all[path] = { recursive = (opts and opts.recursive) == true, at = os.time() }
+    local recursive = (opts and opts.recursive) == true
+    all[path] = { recursive = recursive, at = os.time() }
+    if not recursive then
+      all[path].hash, all[path].files = fp.hash, fp.files
+    end
   end)
   return path
 end
@@ -135,6 +323,7 @@ function M.ask(root, what, cb)
   end
   asking[path] = { cb }
   local parent = vim.fs.dirname(path)
+  local drifted = M.drift(path)
   local choices = {
     { "Trust this workspace", "trust" },
     { "Trust everything under " .. parent, "parent" },
@@ -152,7 +341,8 @@ function M.ask(root, what, cb)
     end
   end
   vim.ui.select(choices, {
-    prompt = ("Trust %s?\n%s can run code from it (build.rs, proc macros, tests, workflow steps)."):format(path, what),
+    prompt = ("Trust %s?\n%s can run code from it (build.rs, proc macros, tests, workflow steps)."):format(path, what)
+      .. (drifted and ("\nTrusted before, but changed since: %s%s"):format(table.concat(vim.list_slice(drifted, 1, 6), ", "), #drifted > 6 and (" and " .. (#drifted - 6) .. " more") or "") or ""),
     format_item = function(c)
       return c[1]
     end,

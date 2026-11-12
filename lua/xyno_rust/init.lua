@@ -10,7 +10,7 @@ local M = {}
 ---        nothing older changed
 ---   1.1  async cargo layer (cargo.lua), trust.lua, rust_context.root_async / root(path, { nowait }),
 ---        rust_routes.collect_async; every older function keeps its signature and result
-M.api_version = "1.2"
+M.api_version = "1.3"
 M.version = "0.3.0"
 
 --- Whether this plugin satisfies a dependent's needs: `compatible("1.1")` is true for any 1.x with x >= 1.
@@ -44,6 +44,7 @@ M.defaults = {
     runs = true, -- xyno_rust.run_configs: :RustRun, :RustRunLast, :RustRunEdit, :RustRunDelete (saved per project)
     actions = true, -- xyno_rust.action_menu: :RustActions, :RustRefactor (diff preview), :RustFixAll
     profile = true, -- xyno_rust.profiler: :RustProfile (in-editor hot functions / call tree)
+    tokio = true, -- xyno_rust.tokio: :TokioConsole (project check, launch), the async debugging hint
     trust = true, -- xyno_rust.trust: :RustTrust (the trust API works without it; this only defines the command)
   },
   tools = {}, -- :RustTools list: { hide = { "audit", ... }, extra = { { text = "...", cmd = { "cargo", ... }, flags = false } } }
@@ -171,6 +172,9 @@ function M.setup(opts)
   end
   if m.profile then
     require("xyno_rust.profiler").setup(sub)
+  end
+  if m.tokio then
+    require("xyno_rust.tokio").setup(sub)
   end
   if m.routes then
     require("xyno_rust.rust_routes").setup(sub)
