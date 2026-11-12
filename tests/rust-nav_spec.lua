@@ -316,3 +316,27 @@ describe("rust_nav", function()
   end)
 end)
 
+
+describe("grouped usages (:RustUsages)", function()
+  local N = require("xyno_rust.rust_nav")
+  it("usage_group tells imports, docs, tests and code apart", function()
+    H.eq("import", N.usage_group("/src/a.rs", "use crate::x::Y;"))
+    H.eq("import", N.usage_group("/src/a.rs", "pub(crate) use self::y::Z;"))
+    H.eq("docs", N.usage_group("/src/a.rs", "/// see [`Y`]"))
+    H.eq("tests", N.usage_group("/tests/it.rs", "let y = Y::new();"))
+    H.eq("tests", N.usage_group("/examples/e.rs", "Y::new()"))
+    H.eq("code", N.usage_group("/src/a.rs", "let y = Y::new();"))
+  end)
+
+  it("group_usages orders by group, file, line and summarises", function()
+    local function loc(path, line) return { uri = "file:///w/" .. path, range = { start = { line = line, character = 4 }, ["end"] = { line = line, character = 5 } } } end
+    local text = {
+      ["file:///w/tests/it.rs"] = { "", "Y::new();" },
+      ["file:///w/src/b.rs"] = { "use crate::Y;", "", "fn f() { Y::new(); }" },
+      ["file:///w/src/a.rs"] = { "/// docs for Y", "fn g() { Y::new(); }" },
+    }
+    local items, summary = N.group_usages({ loc("tests/it.rs", 1), loc("src/b.rs", 2), loc("src/b.rs", 0), loc("src/a.rs", 0), loc("src/a.rs", 1) }, function(u) return text[u] end, function(p) return p:gsub("^/w/", "") end)
+    H.eq({ "code:src/a.rs:2", "code:src/b.rs:3", "import:src/b.rs:1", "tests:tests/it.rs:2", "docs:src/a.rs:1" }, vim.tbl_map(function(i) return i.group .. ":" .. i.path .. ":" .. i.lnum end, items) )
+    H.eq("5 usage(s) in 3 file(s): code 2, import 1, tests 1, docs 1", summary)
+  end)
+end)

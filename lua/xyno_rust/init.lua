@@ -60,6 +60,7 @@ M.default_keymaps = {
   routes = "<leader>rN",
   goto_super = "<leader>ru",
   local_usages = "<leader>rl",
+  all_usages = "<leader>rU",
   doctests = "<leader>tD",
 }
 
@@ -79,6 +80,12 @@ local ACTIONS = {
       require("xyno_rust.rust_nav").local_usages()
     end,
     "Usages in file (R/W)",
+  },
+  all_usages = {
+    function()
+      require("xyno_rust.rust_nav").all_usages()
+    end,
+    "Usages, grouped (code / imports / tests / docs)",
   },
   doctests = {
     function()
@@ -192,6 +199,11 @@ function M.setup(opts)
   end
   if m.restart then
     require("xyno_rust.rust_restart").setup(sub)
+  end
+  if opts.commands then
+    vim.api.nvim_create_user_command("RustUsages", function()
+      require("xyno_rust.rust_nav").all_usages()
+    end, { desc = "Usages of the symbol under the cursor in the workspace, grouped (code / imports / tests / docs)" })
   end
   if opts.keymaps then
     map_keys(opts.keymaps)
