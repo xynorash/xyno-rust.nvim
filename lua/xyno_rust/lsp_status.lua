@@ -254,9 +254,24 @@ local function deps_status(client, quiescent)
   end
 end
 
+--- Parts a config adds in front of the server states (e.g. "restricted" for an untrusted workspace).
+--- fn(bufnr) -> string ("" for nothing). A failing part is skipped.
+local extra = {}
+function M.add_part(fn)
+  if not vim.tbl_contains(extra, fn) then
+    table.insert(extra, fn)
+  end
+end
+
 --- Combined lualine string ("" hides the component outside Rust buffers).
 function M.component()
   local parts = {}
+  for _, f in ipairs(extra) do
+    local ok, s = pcall(f, vim.api.nvim_get_current_buf())
+    if ok and type(s) == "string" and s ~= "" then
+      parts[#parts + 1] = s
+    end
+  end
   for _, f in ipairs({ M.deps, M.rust_analyzer, M.bacon }) do
     parts[#parts + 1] = f()
   end

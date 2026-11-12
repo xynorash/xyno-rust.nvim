@@ -140,7 +140,7 @@ end)
 trust.ra_overrides(root)                     -- rust-analyzer settings without build scripts / proc macros ({} if trusted)
 ```
 
-Limits: the plugin does not start rust-analyzer or bacon-ls, so it cannot stop them from running build scripts and proc macros in an untrusted workspace; `ra_overrides(root)` gives the settings to merge into your server config, and nothing applies it for you. There is no enterprise-style policy, no per-action allow list and no restricted-mode UI. When Neovim has no UI to ask (headless), the answer is "do not run".
+Limits: the plugin does not start rust-analyzer or bacon-ls, so it cannot stop them from running build scripts and proc macros in an untrusted workspace; `ra_overrides(root)` gives the settings to merge into your server config, and nothing applies it for you (xynovim's `lua/config/workspace_trust.lua` is one such config: it merges them, adds `checkOnSave = false`, does not start clippy, restarts the servers when `trust.trust` / `trust.revoke` run, and shows `RESTRICTED` through `lsp_status.add_part(fn)`, where `fn(bufnr)` returns a string added in front of the server states). There is no enterprise-style policy, no per-action allow list and no restricted-mode UI. When Neovim has no UI to ask (headless), the answer is "do not run".
 
 ## Compatibility contract
 
