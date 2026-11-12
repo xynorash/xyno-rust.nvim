@@ -41,6 +41,7 @@ M.defaults = {
     restart = true, -- xyno_rust.rust_restart: server supervision
     trust = true, -- xyno_rust.trust: :RustTrust (the trust API works without it; this only defines the command)
   },
+  tools = {}, -- :RustTools list: { hide = { "audit", ... }, extra = { { text = "...", cmd = { "cargo", ... }, flags = false } } }
 }
 
 --- Default keys of `keymaps = true`. An entry set to false in a table is skipped.
@@ -103,13 +104,48 @@ local function map_keys(keymaps)
 end
 
 --- Configure and start the plugin. Safe to call again (autocmd groups are cleared and redefined).
----@param opts? { commands?: boolean, keymaps?: boolean|table<string, string|false>, modules?: table<string, boolean> }
+---@param opts? { commands?: boolean, keymaps?: boolean|table<string, string|false>, modules?: table<string, boolean>, tools?: { hide?: string[], extra?: table[] } }
 function M.setup(opts)
   opts = vim.tbl_deep_extend("force", vim.deepcopy(M.defaults), opts or {})
   if vim.fn.has("nvim-0.12") ~= 1 then
     vim.notify("xyno-rust: Neovim 0.12 or newer is required", vim.log.levels.ERROR)
     return
   end
+  local problems = {}
+  if type(opts.commands) ~= "boolean" then
+    problems[#problems + 1] = "commands must be a boolean"
+    opts.commands = true
+  end
+  if opts.keymaps ~= false and opts.keymaps ~= true and type(opts.keymaps) ~= "table" then
+    problems[#problems + 1] = "keymaps must be false, true or a table"
+    opts.keymaps = false
+  end
+  if type(opts.modules) ~= "table" then
+    problems[#problems + 1] = "modules must be a table"
+    opts.modules = vim.deepcopy(M.defaults.modules)
+  else
+    for k, v in pairs(opts.modules) do
+      if M.defaults.modules[k] == nil then
+        problems[#problems + 1] = ("unknown module `%s`"):format(tostring(k))
+        opts.modules[k] = nil
+      elseif type(v) ~= "boolean" then
+        problems[#problems + 1] = ("module `%s` must be a boolean"):format(k)
+        opts.modules[k] = M.defaults.modules[k]
+      end
+    end
+  end
+  local tasks = require("xyno_rust.rust_tasks")
+  local tp = tasks.validate_tools(opts.tools)
+  if #tp == 0 then
+    tasks.set_tools(opts.tools)
+  else
+    vim.list_extend(problems, tp)
+    tasks.set_tools({}) -- the default list stays
+  end
+  if #problems > 0 then
+    vim.notify("xyno-rust: invalid options ignored:\n  " .. table.concat(problems, "\n  "), vim.log.levels.WARN)
+  end
+  require("xyno_rust.ui").setup()
   local sub = { commands = opts.commands }
   local m = opts.modules
   if m.context then

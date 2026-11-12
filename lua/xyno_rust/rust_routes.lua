@@ -236,10 +236,10 @@ function M.pick()
         items = items,
         format = function(item)
           return {
-            { ("%-7s"):format(item.kind), "Keyword" },
-            { item.route .. "  ", "String" },
-            { item.detail .. "  ", "Function" },
-            { item.rel, "Comment" },
+            { ("%-7s"):format(item.kind), "XynoRustRouteKind" },
+            { item.route .. "  ", "XynoRustRoutePath" },
+            { item.detail .. "  ", "XynoRustRouteDetail" },
+            { item.rel, "XynoRustRouteFile" },
           }
         end,
         preview = "file",

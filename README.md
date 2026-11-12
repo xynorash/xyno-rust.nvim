@@ -60,8 +60,25 @@ Load it when you open Rust (`ft`) or run one of its commands (`cmd`): the server
     restart = true, -- xyno_rust.rust_restart (autocommands)
     trust = true,   -- xyno_rust.trust (only defines :RustTrust; the trust API works without it)
   },
+  tools = {},    -- :RustTools list, see below
 }
 ```
+
+Options are validated: a wrong type, an unknown module or an invalid tool gives one warning listing every problem, the valid parts apply and the rest keeps its default.
+
+| option | default | meaning |
+| --- | --- | --- |
+| `commands` | `true` | define the user commands |
+| `keymaps` | `false` | `true` or a table (below) |
+| `modules.<name>` | all `true` | `context`, `tasks`, `routes`, `status`, `restart`, `trust` |
+| `tools.hide` | `{}` | ids to drop from `:RustTools`: `timings`, `bloat_crates`, `bloat_functions`, `machete`, `deny_fetch`, `deny_check`, `audit`, `tree_dups`, `llvm_cov` |
+| `tools.extra` | `{}` | entries appended to `:RustTools`: `{ text = "typos", cmd = { "typos" }, flags = false }`. `cmd` is an argv list (never a shell string); `flags = true` appends the stored features / target of the workspace |
+
+The built-in list is `require("xyno_rust.rust_tasks").default_tools`. A second `setup()` replaces the tool options of the first.
+
+### Highlight groups
+
+The pickers are snacks.nvim's. The route picker's columns have their own groups, linked to theme groups with `default = true` (your colorscheme or config wins; the links come back after `:colorscheme`): `XynoRustRouteKind` (`Keyword`), `XynoRustRoutePath` (`String`), `XynoRustRouteDetail` (`Function`), `XynoRustRouteFile` (`Comment`).
 
 No global keymap is set by default. `keymaps = true` maps these, buffer-local in Rust files: `<leader>rF` context, `rX` targets, `rZ` tools, `rN` routes, `ru` go to super method, `rl` usages in file, `<leader>tD` doctests. A table maps only the actions you list, to the keys you choose (`false` skips one).
 

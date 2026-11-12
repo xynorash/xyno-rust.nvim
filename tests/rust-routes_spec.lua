@@ -399,7 +399,7 @@ ts_describe("rust_routes.pick", function()
     end
   end)
 
-  it("format() returns 4 chunks: kind padded to 7 (Keyword), route (String), detail (Function), rel (Comment)", function()
+  it("format() returns 4 chunks: kind padded to 7 (XynoRustRouteKind), route, detail, rel", function()
     local dir = crate({ ["src/main.rs"] = 'fn a(){ r.route("/m", get(m)); }\n' })
     vim.cmd.edit(vim.fn.fnameescape(dir .. "/src/main.rs"))
     stub_snacks()
@@ -408,13 +408,13 @@ ts_describe("rust_routes.pick", function()
     local p = H.ok(picked[1], "picker was not opened")
     local chunks = p.format(p.items[1])
     H.eq({
-      { "ROUTE  ", "Keyword" },
-      { "/m  ", "String" },
-      { "get(m)  ", "Function" },
-      { "src/main.rs", "Comment" },
+      { "ROUTE  ", "XynoRustRouteKind" },
+      { "/m  ", "XynoRustRoutePath" },
+      { "get(m)  ", "XynoRustRouteDetail" },
+      { "src/main.rs", "XynoRustRouteFile" },
     }, chunks)
     H.eq(7, #chunks[1][1])
-    H.eq({ "GET    ", "Keyword" }, p.format({ kind = "GET", route = "/", detail = "d", rel = "r" })[1])
+    H.eq({ "GET    ", "XynoRustRouteKind" }, p.format({ kind = "GET", route = "/", detail = "d", rel = "r" })[1])
   end)
 end)
 

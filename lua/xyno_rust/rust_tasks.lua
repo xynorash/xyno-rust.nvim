@@ -193,18 +193,110 @@ function M.new(name)
   end
 end
 
--- Workspace-wide tools (supply chain, size, build time).
-local TOOLS = {
-  { "timings (cargo build --timings; report in target/cargo-timings)", { "cargo", "build", "--timings" }, true },
-  { "bloat by crate (release)", { "cargo", "bloat", "--release", "--crates" }, true },
-  { "bloat by function (release, top 30)", { "cargo", "bloat", "--release", "-n", "30" }, true },
-  { "unused dependencies (cargo machete)", { "cargo", "machete" } },
-  { "deny: fetch advisory DB", { "cargo", "deny", "fetch" } },
-  { "deny: check all", { "cargo", "deny", "check" } },
-  { "audit (RustSec)", { "cargo", "audit" } },
-  { "duplicate dependency versions", { "cargo", "tree", "-d" } },
-  { "coverage report (summary in terminal)", { "cargo", "llvm-cov", "--workspace", "--ignore-run-fail", "--summary-only" }, true },
+-- Workspace-wide tools (supply chain, size, build time). `flags` = builds the workspace, so the
+-- stored features / target are appended. `id` is what setup{ tools = { hide = {...} } } names.
+M.default_tools = {
+  { id = "timings", text = "timings (cargo build --timings; report in target/cargo-timings)", cmd = { "cargo", "build", "--timings" }, flags = true },
+  { id = "bloat_crates", text = "bloat by crate (release)", cmd = { "cargo", "bloat", "--release", "--crates" }, flags = true },
+  { id = "bloat_functions", text = "bloat by function (release, top 30)", cmd = { "cargo", "bloat", "--release", "-n", "30" }, flags = true },
+  { id = "machete", text = "unused dependencies (cargo machete)", cmd = { "cargo", "machete" } },
+  { id = "deny_fetch", text = "deny: fetch advisory DB", cmd = { "cargo", "deny", "fetch" } },
+  { id = "deny_check", text = "deny: check all", cmd = { "cargo", "deny", "check" } },
+  { id = "audit", text = "audit (RustSec)", cmd = { "cargo", "audit" } },
+  { id = "tree_dups", text = "duplicate dependency versions", cmd = { "cargo", "tree", "-d" } },
+  { id = "llvm_cov", text = "coverage report (summary in terminal)", cmd = { "cargo", "llvm-cov", "--workspace", "--ignore-run-fail", "--summary-only" }, flags = true },
 }
+
+local tools_cfg = { hide = {}, extra = {} }
+
+--- Check setup{ tools = { hide = { id, ... }, extra = { { text, cmd, flags? }, ... } } }.
+--- Returns the problems; nothing is applied when there is one.
+---@return string[]
+function M.validate_tools(t)
+  if type(t) ~= "table" then
+    return { "tools must be a table" }
+  end
+  local problems = {}
+  local ids = {}
+  for _, d in ipairs(M.default_tools) do
+    ids[d.id] = true
+  end
+  for k in pairs(t) do
+    if k ~= "hide" and k ~= "extra" then
+      problems[#problems + 1] = ("unknown tools option `%s`"):format(tostring(k))
+    end
+  end
+  if t.hide ~= nil then
+    if type(t.hide) ~= "table" or (next(t.hide) ~= nil and not vim.islist(t.hide)) then
+      problems[#problems + 1] = "tools.hide must be a list of tool ids"
+    else
+      for _, id in ipairs(t.hide) do
+        if not ids[id] then
+          problems[#problems + 1] = ("tools.hide: unknown tool `%s` (known: %s)"):format(tostring(id), table.concat(vim.tbl_map(function(d) return d.id end, M.default_tools), ", "))
+        end
+      end
+    end
+  end
+  if t.extra ~= nil then
+    if type(t.extra) ~= "table" or (next(t.extra) ~= nil and not vim.islist(t.extra)) then
+      problems[#problems + 1] = "tools.extra must be a list of { text, cmd, flags? }"
+    else
+      for i, e in ipairs(t.extra) do
+        local p = ("tools.extra[%d]"):format(i)
+        if type(e) ~= "table" then
+          problems[#problems + 1] = p .. " must be a table"
+        else
+          for k in pairs(e) do
+            if k ~= "text" and k ~= "cmd" and k ~= "flags" then
+              problems[#problems + 1] = ("%s: unknown key `%s`"):format(p, tostring(k))
+            end
+          end
+          if type(e.text) ~= "string" or e.text == "" or e.text:find("[\n\r]") then
+            problems[#problems + 1] = p .. ".text must be a one-line string"
+          end
+          if e.flags ~= nil and type(e.flags) ~= "boolean" then
+            problems[#problems + 1] = p .. ".flags must be a boolean"
+          end
+          if type(e.cmd) ~= "table" or not vim.islist(e.cmd) or #e.cmd == 0 then
+            problems[#problems + 1] = p .. ".cmd must be a non-empty argv list (no shell string)"
+          else
+            for _, a in ipairs(e.cmd) do
+              if type(a) ~= "string" or a == "" or a:find("%z") then
+                problems[#problems + 1] = p .. ".cmd entries must be non-empty strings"
+                break
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  return problems
+end
+
+--- Apply validated options (replaces the earlier ones; {} restores the defaults).
+function M.set_tools(t)
+  t = t or {}
+  tools_cfg = { hide = {}, extra = {} }
+  for _, id in ipairs(t.hide or {}) do
+    tools_cfg.hide[id] = true
+  end
+  tools_cfg.extra = vim.deepcopy(t.extra or {})
+end
+
+--- The tools :RustTools lists: the defaults minus the hidden ones, then the extra ones.
+function M.tool_list()
+  local out = {}
+  for _, d in ipairs(M.default_tools) do
+    if not tools_cfg.hide[d.id] then
+      out[#out + 1] = d
+    end
+  end
+  for _, e in ipairs(tools_cfg.extra) do
+    out[#out + 1] = e
+  end
+  return out
+end
 
 local function has_deny_config(root)
   for _, f in ipairs({ "deny.toml", ".deny.toml", ".cargo/deny.toml" }) do
@@ -221,16 +313,16 @@ function M.tools()
       return vim.notify("no Cargo.toml found", vim.log.levels.WARN)
     end
     local items = vim.tbl_map(function(t)
-      local cmd = t[2]
-      if t[3] then -- builds the workspace: same features/target as the diagnostics
+      local cmd = t.cmd
+      if t.flags then -- builds the workspace: same features/target as the diagnostics
         cmd = vim.list_extend(vim.deepcopy(cmd), ctx_flags(root))
       end
       -- no deny.toml: every dependency fails the (empty) licence allow list
-      if t[2][3] == "check" and #t[2] == 3 and not has_deny_config(root) then
-        return { text = t[1] .. " (no deny.toml: licenses skipped)", cmd = { "cargo", "deny", "check", "advisories", "bans", "sources" } }
+      if t.id == "deny_check" and not has_deny_config(root) then
+        return { text = t.text .. " (no deny.toml: licenses skipped)", cmd = { "cargo", "deny", "check", "advisories", "bans", "sources" } }
       end
-      return { text = t[1], cmd = cmd }
-    end, TOOLS)
+      return { text = t.text, cmd = cmd }
+    end, M.tool_list())
     local Snacks = require("xyno_rust.deps").snacks()
     if not Snacks then
       return
