@@ -101,6 +101,16 @@ local function stopped(bufnr, name)
   return flags ~= nil and flags[name] == true
 end
 
+local ra_checked = { at = 0, ok = true }
+--- Whether a rust-analyzer binary is on PATH (looked up at most once every 5 s: the statusline asks on every redraw).
+function M.ra_installed()
+  local now = vim.uv.now()
+  if now - ra_checked.at > 5000 or ra_checked.at == 0 then
+    ra_checked = { at = now, ok = vim.fn.executable("rust-analyzer") == 1 }
+  end
+  return ra_checked.ok
+end
+
 local explained = {} -- root -> "<mtime>|<message>" already reported
 
 --- rust-analyzer says "Failed to load workspaces" and nothing else (rustaceanvim's toast adds "Run
@@ -154,7 +164,15 @@ end
 function M.rust_analyzer(bufnr)
   local c = vim.lsp.get_clients({ bufnr = bufnr or 0, name = "rust-analyzer" })[1]
   if not c then
-    return stopped(bufnr or 0, "rust-analyzer") and "RA stopped" or nil
+    if stopped(bufnr or 0, "rust-analyzer") then
+      return "RA stopped"
+    end
+    -- no server and no binary to start: nothing else on screen says so after rustaceanvim's one toast
+    local b = bufnr or 0
+    if vim.api.nvim_buf_is_valid(b) and vim.bo[b].filetype == "rust" and not M.ra_installed() then
+      return "RA missing"
+    end
+    return nil
   end
   local s = st(c.id)
   local busy = progress_text(s)
