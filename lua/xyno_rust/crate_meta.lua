@@ -153,14 +153,16 @@ local pending = {} -- root -> { callbacks }
 
 --- Workspace root of a directory or file (a directory holding Cargo.toml is
 --- taken as is, which also covers a path outside any workspace of its own).
-function M.root(path)
+--- `opts.nowait` as for rust_context.root: never block on cargo (event handlers).
+---@param opts? { nowait?: boolean }
+function M.root(path, opts)
   path = path or vim.api.nvim_buf_get_name(0)
   local st = vim.uv.fs_stat(path)
   local rc = require("xyno_rust.rust_context")
   if st and st.type == "directory" and vim.uv.fs_stat(path .. "/Cargo.toml") then
     return rc.canon(path) -- one spelling of a root (Windows drive letter / slashes)
   end
-  return rc.root(path)
+  return rc.root(path, opts)
 end
 
 local function stamp_of(root, meta)
