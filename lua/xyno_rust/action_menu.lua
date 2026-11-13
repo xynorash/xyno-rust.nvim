@@ -119,7 +119,7 @@ function M.edit_diff(edit, enc)
     if not ok then
       out[#out + 1] = ("(%s: the edit does not fit the file: %s)"):format(name, tostring(new))
     else
-      local d = vim.diff(
+      local d = vim.text.diff(
         table.concat(old, "\n") .. "\n",
         table.concat(new, "\n") .. "\n",
         { result_type = "unified", ctxlen = 3 }
