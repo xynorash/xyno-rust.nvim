@@ -19,8 +19,13 @@
 --
 -- Trust follows the content that runs code. A trust entry of its own (not "everything under <parent>")
 -- stores a fingerprint of what cargo executes or obeys in that workspace: every Cargo.toml and build.rs
--- below the root, .cargo/config(.toml) and rust-toolchain(.toml) in the tree and in the parent
--- directories (cargo and rustup read those upward). When the content differs (a `git pull`, a checkout
+-- below the root, a build script at a custom path (`build = "x/gen.rs"`) and its modules, path
+-- dependencies and workspace members outside the root (manifest, build script), every source file of a
+-- proc-macro crate, .cargo/config(.toml) and rust-toolchain(.toml) in the tree and in the parent
+-- directories (cargo and rustup read those upward). The list comes from `cargo metadata --no-deps
+-- --offline` (read in the background, `prime`) plus a bounded manifest scan that needs no cargo; files are
+-- hashed whole up to 32 MiB (see the fingerprint section). Entries recorded by an older version re-ask once
+-- for a workspace that has such files. When the content differs (a `git pull`, a checkout
 -- of another branch, an unseen edit by another tool) the workspace is untrusted again and the next
 -- action asks once more, naming the files. Not part of it: .rs sources, Cargo.lock, target/, .git/
 -- (ordinary edits and a lockfile refresh never ask). Edits made inside nvim call `rehash`, so the
