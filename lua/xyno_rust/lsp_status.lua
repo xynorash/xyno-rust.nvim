@@ -101,6 +101,56 @@ local function stopped(bufnr, name)
   return flags ~= nil and flags[name] == true
 end
 
+local explained = {} -- root -> "<mtime>|<message>" already reported
+
+--- rust-analyzer says "Failed to load workspaces" and nothing else (rustaceanvim's toast adds "Run
+--- :RustLsp logFile"). Ask cargo what is wrong with the manifests and say that: a broken Cargo.toml
+--- reads "TOML parse error at line 6", a bad feature "feature `a` includes `nope`". One report per
+--- root and state of the manifest. `cargo metadata --no-deps` neither builds nor resolves dependencies,
+--- so it needs no network.
+---@param root string?
+---@param message string? rust-analyzer's own text
+function M.explain(root, message)
+  if not (root and vim.fn.executable("cargo") == 1) then
+    return
+  end
+  local stat = vim.uv.fs_stat(root .. "/Cargo.toml")
+  local key = (stat and stat.mtime.sec or 0) .. "|" .. tostring(message)
+  if explained[root] == key then
+    return
+  end
+  explained[root] = key
+  require("xyno_rust.cargo").metadata_async(root, function(meta, err)
+    if meta then
+      local first = vim.split(vim.trim(message or ""), "\n")[1]
+      return vim.notify(
+        "rust-analyzer could not load the workspace"
+          .. (first ~= "" and (": " .. first) or "")
+          .. " (cargo reads the manifests fine). :RustLsp logFile has the details.",
+        vim.log.levels.WARN,
+        { title = "rust-analyzer" }
+      )
+    end
+    local lines = {}
+    for _, l in ipairs(vim.split(tostring(err), "\n", { trimempty = true })) do
+      l = vim.trim(l)
+      if l ~= "" and l ~= "Caused by:" and not l:match("^|") and not l:match("^%d+ |") then
+        lines[#lines + 1] = (l:gsub("^error: ", ""):gsub("^%-%-> ", "at "))
+      end
+      if #lines >= 4 then
+        break
+      end
+    end
+    vim.notify(
+      "rust-analyzer cannot load this project, cargo says: "
+        .. table.concat(lines, " | ")
+        .. "\nFix Cargo.toml and save: it reloads by itself.",
+      vim.log.levels.ERROR,
+      { title = "Cargo.toml" }
+    )
+  end, { refresh = true })
+end
+
 function M.rust_analyzer(bufnr)
   local c = vim.lsp.get_clients({ bufnr = bufnr or 0, name = "rust-analyzer" })[1]
   if not c then
@@ -330,6 +380,15 @@ function M.setup()
           if result then
             s.health, s.quiescent, s.message = result.health, result.quiescent, result.message
             deps_status(client, result.quiescent)
+            if
+              result.health == "error"
+              and result.quiescent
+              and not (result.message or ""):find("Failed to discover workspace", 1, true)
+            then
+              vim.schedule(function()
+                M.explain(client.root_dir or (client.config or {}).root_dir, result.message)
+              end)
+            end
             redraw()
           end
           if orig then
