@@ -52,6 +52,9 @@ vim.notify = function(msg)
   notes[#notes + 1] = msg
 end
 vim.cmd("RustContext show")
+vim.wait(30000, function() -- the root is asked of cargo in the background
+  return #notes > 0
+end, 20)
 check(":RustContext show", notes[#notes] == "Rust context: all features, host target", notes[#notes])
 local rc = require("xyno_rust.rust_context")
 check("rust_context.root", rc.root() == dir, tostring(rc.root()))
