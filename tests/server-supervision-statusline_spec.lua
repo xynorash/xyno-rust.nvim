@@ -127,7 +127,12 @@ local function fake_client(s, opts)
     attached[b] = true
   end
   -- a bacon-ls root is a Cargo workspace root (sweep stops a client whose root lost it)
-  if opts.root and opts.name == "bacon_ls" and vim.fn.isdirectory(opts.root) == 1 and vim.fn.filereadable(opts.root .. "/Cargo.toml") == 0 then
+  if
+    opts.root
+    and opts.name == "bacon_ls"
+    and vim.fn.isdirectory(opts.root) == 1
+    and vim.fn.filereadable(opts.root .. "/Cargo.toml") == 0
+  then
     vim.fn.writefile({ "[package]" }, opts.root .. "/Cargo.toml")
   end
   local c = {
@@ -218,7 +223,14 @@ describe("rust_restart: setup and on_exit", function()
     for _, a in ipairs(vim.api.nvim_get_autocmds({ group = RR_GROUP })) do
       events[a.event] = true
     end
-    H.eq({ BufWritePost = true, FileChangedShellPost = true, FocusGained = true, LspAttach = true, User = true, VimLeavePre = true }, events)
+    H.eq({
+      BufWritePost = true,
+      FileChangedShellPost = true,
+      FocusGained = true,
+      LspAttach = true,
+      User = true,
+      VimLeavePre = true,
+    }, events)
   end)
 
   it("a clean exit (code 0, signal 0) does nothing", function()
@@ -358,44 +370,50 @@ describe("rust_restart: :RustRestart and sweep", function()
     H.eq(true, c.stopped)
   end)
 
-  it("a save (BufWritePost or auto-save's User AutoSaveWritePost) sweeps too: a moved project is noticed without FocusGained", function()
-    for _, fire_it in ipairs({
-      function()
-        vim.api.nvim_exec_autocmds("BufWritePost", { modeline = false })
-      end,
-      function()
-        vim.api.nvim_exec_autocmds("User", { pattern = "AutoSaveWritePost", modeline = false })
-      end,
-    }) do
-      local alive, gone = H.tmpdir(), H.tmpdir()
-      local c1 = fake_client(s, { name = "bacon_ls", root = alive })
-      local c2 = fake_client(s, { name = "bacon_ls", root = gone })
-      vim.fn.delete(gone, "rf")
-      fire_it()
-      H.is_nil(c1.stopped)
-      H.eq(true, c2.stopped, "stopped on save")
+  it(
+    "a save (BufWritePost or auto-save's User AutoSaveWritePost) sweeps too: a moved project is noticed without FocusGained",
+    function()
+      for _, fire_it in ipairs({
+        function()
+          vim.api.nvim_exec_autocmds("BufWritePost", { modeline = false })
+        end,
+        function()
+          vim.api.nvim_exec_autocmds("User", { pattern = "AutoSaveWritePost", modeline = false })
+        end,
+      }) do
+        local alive, gone = H.tmpdir(), H.tmpdir()
+        local c1 = fake_client(s, { name = "bacon_ls", root = alive })
+        local c2 = fake_client(s, { name = "bacon_ls", root = gone })
+        vim.fn.delete(gone, "rf")
+        fire_it()
+        H.is_nil(c1.stopped)
+        H.eq(true, c2.stopped, "stopped on save")
+      end
     end
-  end)
+  )
 
-  it("a save restarts bacon-ls once target/bacon-ls-live was recreated (cargo clean: clippy stayed 'ok' and blind)", function()
-    local d = H.tmpdir()
-    fake_client(s, { name = "bacon_ls", root = d })
-    vim.fn.mkdir(d .. "/target/bacon-ls-live/shadow", "p")
-    local save = function()
-      vim.api.nvim_exec_autocmds("BufWritePost", { modeline = false })
+  it(
+    "a save restarts bacon-ls once target/bacon-ls-live was recreated (cargo clean: clippy stayed 'ok' and blind)",
+    function()
+      local d = H.tmpdir()
+      fake_client(s, { name = "bacon_ls", root = d })
+      vim.fn.mkdir(d .. "/target/bacon-ls-live/shadow", "p")
+      local save = function()
+        vim.api.nvim_exec_autocmds("BufWritePost", { modeline = false })
+      end
+      save()
+      save()
+      H.eq(0, has_cmd(s, "lsp restart bacon_ls"), "same directory: nothing to do")
+      vim.fn.delete(d .. "/target", "rf")
+      save()
+      H.eq(0, has_cmd(s, "lsp restart bacon_ls"), "gone and not yet recreated: nothing to compare")
+      vim.fn.mkdir(d .. "/target/bacon-ls-live/shadow", "p")
+      save()
+      H.eq(1, has_cmd(s, "lsp restart bacon_ls"), "recreated: restart")
+      save()
+      H.eq(1, has_cmd(s, "lsp restart bacon_ls"), "once")
     end
-    save()
-    save()
-    H.eq(0, has_cmd(s, "lsp restart bacon_ls"), "same directory: nothing to do")
-    vim.fn.delete(d .. "/target", "rf")
-    save()
-    H.eq(0, has_cmd(s, "lsp restart bacon_ls"), "gone and not yet recreated: nothing to compare")
-    vim.fn.mkdir(d .. "/target/bacon-ls-live/shadow", "p")
-    save()
-    H.eq(1, has_cmd(s, "lsp restart bacon_ls"), "recreated: restart")
-    save()
-    H.eq(1, has_cmd(s, "lsp restart bacon_ls"), "once")
-  end)
+  )
 
   it("a repaired or deleted Cargo.lock restarts bacon-ls only while clippy has failed", function()
     local d = H.tmpdir()
@@ -429,28 +447,31 @@ describe("rust_restart: :RustRestart and sweep", function()
     H.ok(ok, tostring(err))
   end)
 
-  it("the exit of a client sweep stopped (SIGTERM) is no crash: no 'exited ... restarting' warning, no restart", function()
-    local gone = H.tmpdir()
-    local c = fake_client(s, { name = "bacon_ls", root = gone, bufs = {} })
-    vim.fn.delete(gone, "rf")
-    local rr = require("xyno_rust.rust_restart")
-    -- earlier tests' deferred (500 ms) restarts fire in this window: let them go first
-    vim.wait(700, function()
-      return false
-    end, 20)
-    s.enabled, s.notes = {}, {}
-    rr.sweep()
-    H.eq(true, c.stopped)
-    rr.on_exit("bacon_ls")(nil, 15, c.id) -- what a SIGTERMed server reports
-    vim.wait(800, function()
-      return false
-    end, 20) -- the restart, if any, is deferred by 500 ms
-    local warned = vim.tbl_filter(function(n)
-      return n.msg:find("restarting", 1, true)
-    end, s.notes)
-    H.eq({}, warned)
-    H.eq({}, s.enabled, "bacon_ls restarted for a deleted workspace")
-  end)
+  it(
+    "the exit of a client sweep stopped (SIGTERM) is no crash: no 'exited ... restarting' warning, no restart",
+    function()
+      local gone = H.tmpdir()
+      local c = fake_client(s, { name = "bacon_ls", root = gone, bufs = {} })
+      vim.fn.delete(gone, "rf")
+      local rr = require("xyno_rust.rust_restart")
+      -- earlier tests' deferred (500 ms) restarts fire in this window: let them go first
+      vim.wait(700, function()
+        return false
+      end, 20)
+      s.enabled, s.notes = {}, {}
+      rr.sweep()
+      H.eq(true, c.stopped)
+      rr.on_exit("bacon_ls")(nil, 15, c.id) -- what a SIGTERMed server reports
+      vim.wait(800, function()
+        return false
+      end, 20) -- the restart, if any, is deferred by 500 ms
+      local warned = vim.tbl_filter(function(n)
+        return n.msg:find("restarting", 1, true)
+      end, s.notes)
+      H.eq({}, warned)
+      H.eq({}, s.enabled, "bacon_ls restarted for a deleted workspace")
+    end
+  )
 
   it("restarts rust-analyzer (RustAnalyzer restart) and bacon_ls, clears flags, notifies", function()
     local root, gone = H.tmpdir(), H.tmpdir()
@@ -472,13 +493,16 @@ describe("rust_restart: :RustRestart and sweep", function()
     H.eq({ { msg = "restarting rust-analyzer and bacon-ls", level = nil } }, s.notes)
   end)
 
-  it("the bacon_ls start switches the config off and on (enable of an enabled config is a no-op: kill -9 stayed dead)", function()
-    local rs = scratch_buf(H.tmpdir() .. "/c.rs", "rust")
-    vim.api.nvim_set_current_buf(rs)
-    vim.cmd("RustRestart")
-    H.eq({ "bacon_ls" }, s.disabled)
-    H.eq({ "bacon_ls" }, s.enabled)
-  end)
+  it(
+    "the bacon_ls start switches the config off and on (enable of an enabled config is a no-op: kill -9 stayed dead)",
+    function()
+      local rs = scratch_buf(H.tmpdir() .. "/c.rs", "rust")
+      vim.api.nvim_set_current_buf(rs)
+      vim.cmd("RustRestart")
+      H.eq({ "bacon_ls" }, s.disabled)
+      H.eq({ "bacon_ls" }, s.enabled)
+    end
+  )
 
   it("starts rust-analyzer for loaded rust buffers and bacon_ls when neither client exists", function()
     local rs = scratch_buf(H.tmpdir() .. "/b.rs", "rust")
@@ -504,51 +528,150 @@ describe("rust_restart: VimLeavePre kill of servers that never initialised", fun
     fresh_restart()
   end)
 
-  it("stops the uninitialised clients and SIGKILLs this nvim's server children of that name; initialised ones are left", function()
-    local rr = require("xyno_rust.rust_restart")
-    local killed = {}
-    local orig_kill, orig_pids = vim.uv.kill, rr.server_pids
-    vim.uv.kill = function(pid, sig)
-      killed[#killed + 1] = { pid, sig }
-      return 0
+  -- Real processes: a stub of server_pids() cannot show the ownership check. A "server" is `sleep`
+  -- under another name (a symlink called rust-analyzer / bacon-ls), as a child of this nvim.
+  local procs = {}
+  local function server_exe(name)
+    local dir = H.tmpdir()
+    local exe = dir .. "/" .. name
+    vim.uv.fs_symlink(vim.fn.exepath("sleep"), exe)
+    -- a multicall coreutils (uutils on newer distributions) refuses an unknown applet name: then the
+    -- "server" is a shell script of that name (the kernel names the process after the script)
+    if vim.system({ exe, "0" }):wait().code ~= 0 then
+      vim.uv.fs_unlink(exe)
+      local f = assert(io.open(exe, "w"))
+      f:write("#!/bin/sh\nsleep 60\n")
+      f:close()
+      vim.uv.fs_chmod(exe, 493) -- 0755
     end
-    rr.server_pids = function()
-      return { [111] = "rust-analyzer", [222] = "bacon-ls" }
-    end
-    local ra = fake_client(s, { name = "rust-analyzer" })
-    local bc = fake_client(s, { name = "bacon_ls", root = H.tmpdir() })
-    ra.initialized = false
-    bc.initialized = true
-    local ok, e = pcall(rr.kill_uninitialised)
-    vim.uv.kill, rr.server_pids = orig_kill, orig_pids
-    H.ok(ok, tostring(e))
-    H.eq(true, ra.stopped, "stopped with force")
-    H.is_nil(bc.stopped)
-    H.eq({ { 111, "sigkill" } }, killed)
-    -- and the exit of the stopped one is no crash to restart from
-    rr.on_exit("rust-analyzer")(nil, 9, ra.id)
-    vim.wait(700, function()
-      return false
+    return exe
+  end
+  local function spawn(name)
+    local obj = vim.system({ server_exe(name), "60" })
+    procs[#procs + 1] = obj
+    -- (nvim reads the name from /proc: wait until the exec happened)
+    H.wait_for(function()
+      local p = vim.api.nvim_get_proc(obj.pid)
+      return p and p.name == name
+    end, 3000, name .. " process")
+    return obj
+  end
+  local function gone(obj)
+    return vim.wait(3000, function()
+      local st = io.open("/proc/" .. obj.pid .. "/stat")
+      if not st then
+        return true
+      end
+      local line = st:read("*l") or ""
+      st:close()
+      return line:match("^%d+ %b() (%a)") == "Z"
     end, 20)
-    H.eq({}, s.ra_starts)
+  end
+  after_each(function()
+    for _, o in ipairs(procs) do
+      pcall(o.kill, o, 9)
+    end
+    procs = {}
   end)
 
-  it("VimLeavePre sends SIGCONT to this nvim's server children first (SIGSTOPped servers were orphaned at quit)", function()
+  it(
+    "stops the uninitialised clients and SIGKILLs this nvim's server children of that name; initialised ones are left",
+    function()
+      H.need_posix("needs /proc and a sleep binary")
+      local rr = require("xyno_rust.rust_restart")
+      local ra_proc, bacon_proc = spawn("rust-analyzer"), spawn("bacon-ls")
+      local ra = fake_client(s, { name = "rust-analyzer" })
+      local bc = fake_client(s, { name = "bacon_ls", root = H.tmpdir() })
+      ra.initialized = false
+      bc.initialized = true
+      local ok, e = pcall(rr.kill_uninitialised)
+      H.ok(ok, tostring(e))
+      H.eq(true, ra.stopped, "stopped with force")
+      H.is_nil(bc.stopped)
+      H.ok(gone(ra_proc), "the uninitialised rust-analyzer child was SIGKILLed")
+      H.eq(0, vim.uv.kill(bacon_proc.pid, 0), "the initialised bacon-ls child is still alive")
+      -- and the exit of the stopped one is no crash to restart from
+      rr.on_exit("rust-analyzer")(nil, 9, ra.id)
+      vim.wait(700, function()
+        return false
+      end, 20)
+      H.eq({}, s.ra_starts)
+    end
+  )
+
+  it("kills a server only when it is a child of this nvim: a same-named process of someone else survives", function()
+    H.need_posix("needs /proc and a sleep binary")
     local rr = require("xyno_rust.rust_restart")
-    local sent = {}
-    local orig_kill, orig_pids = vim.uv.kill, rr.server_pids
-    vim.uv.kill = function(pid, sig)
-      sent[#sent + 1] = { pid, sig }
-      return 0
-    end
-    rr.server_pids = function()
-      return { [111] = "rust-analyzer" }
-    end
-    local ok, e = pcall(vim.api.nvim_exec_autocmds, "VimLeavePre", { group = "xyno_rust_restart", modeline = false })
-    vim.uv.kill, rr.server_pids = orig_kill, orig_pids
-    H.ok(ok, tostring(e))
-    H.eq({ { 111, "sigcont" } }, sent)
+    local mine = spawn("rust-analyzer")
+    -- another nvim's server: same name, but its parent is not us (double fork through sh)
+    local exe = server_exe("rust-analyzer")
+    local out = vim.system({ "sh", "-c", ("%s 60 >/dev/null 2>&1 & echo $!"):format(vim.fn.shellescape(exe)) }):wait()
+    local foreign = tonumber(vim.trim(out.stdout))
+    H.ok(foreign and foreign > 0, "foreign pid")
+    H.wait_for(function()
+      local p = vim.api.nvim_get_proc(foreign)
+      return p and p.name == "rust-analyzer"
+    end, 3000, "foreign process")
+    H.not_ok(vim.api.nvim_get_proc(foreign).ppid == vim.uv.os_getpid(), "precondition: not our child")
+    -- the pid list names both (a stale/recycled pid looks exactly like this)
+    rr.kill_survivors({ [mine.pid] = "rust-analyzer", [foreign] = "rust-analyzer" }, 50)
+    H.ok(gone(mine), "our child was SIGKILLed")
+    vim.wait(300, function()
+      return false
+    end, 20)
+    H.eq(0, vim.uv.kill(foreign, 0), "the process that is not ours was left alone")
+    vim.uv.kill(foreign, 9)
   end)
+
+  it("a recycled pid (same name, same parent, another process) is not killed: the start time must match", function()
+    H.need_posix("needs /proc and a sleep binary")
+    local rr = require("xyno_rust.rust_restart")
+    local first = spawn("rust-analyzer")
+    -- pretend the noted process was an earlier one: forge its start time
+    local orig_owned = rr._owned
+    H.ok(orig_owned(first.pid, "rust-analyzer", nil), "owned without a start time")
+    H.not_ok(orig_owned(first.pid, "rust-analyzer", 1), "a different start time is not the same process")
+    H.not_ok(orig_owned(first.pid, "bacon-ls", nil), "another executable name is not")
+  end)
+
+  it("with two same-named children and one uninitialised client only the newest child is killed", function()
+    H.need_posix("needs /proc and a sleep binary")
+    local rr = require("xyno_rust.rust_restart")
+    local old = spawn("rust-analyzer")
+    vim.wait(60, function()
+      return false
+    end, 10) -- (start times tick at 10 ms)
+    local new = spawn("rust-analyzer")
+    local a = fake_client(s, { name = "rust-analyzer" })
+    local b = fake_client(s, { name = "rust-analyzer" })
+    a.initialized, b.initialized = true, false
+    pcall(rr.kill_uninitialised)
+    H.ok(gone(new), "the newest was killed")
+    vim.wait(200, function()
+      return false
+    end, 20)
+    H.eq(0, vim.uv.kill(old.pid, 0), "the older (initialised) one is alive")
+  end)
+
+  it(
+    "VimLeavePre sends SIGCONT to this nvim's server children first (SIGSTOPped servers were orphaned at quit)",
+    function()
+      local rr = require("xyno_rust.rust_restart")
+      local sent = {}
+      local orig_kill, orig_pids = vim.uv.kill, rr.server_pids
+      vim.uv.kill = function(pid, sig)
+        sent[#sent + 1] = { pid, sig }
+        return 0
+      end
+      rr.server_pids = function()
+        return { [111] = "rust-analyzer" }
+      end
+      local ok, e = pcall(vim.api.nvim_exec_autocmds, "VimLeavePre", { group = "xyno_rust_restart", modeline = false })
+      vim.uv.kill, rr.server_pids = orig_kill, orig_pids
+      H.ok(ok, tostring(e))
+      H.eq({ { 111, "sigcont" } }, sent)
+    end
+  )
 
   it("with every client initialised nothing is killed", function()
     local rr = require("xyno_rust.rust_restart")
@@ -605,20 +728,56 @@ describe("rust_restart: FocusGained refresh", function()
     H.eq(0, has_cmd(s, "silent! checktime"))
   end)
 
-  it("no client left (swept while Cargo.toml was away): a loaded Rust buffer whose manifest is back starts bacon_ls", function()
+  it(
+    "no client left (swept while Cargo.toml was away): a loaded Rust buffer whose manifest is back starts bacon_ls",
+    function()
+      local d = repo()
+      vim.cmd.edit(vim.fn.fnameescape(d .. "/src/main.rs"))
+      local buf = vim.api.nvim_get_current_buf()
+      vim.bo[buf].filetype = "rust"
+      focus()
+      settle()
+      H.eq(0, #s.enabled, "no manifest: nothing to start")
+      vim.fn.writefile({ "[package]", 'name = "t"', 'version = "0.1.0"', 'edition = "2021"' }, d .. "/Cargo.toml")
+      focus()
+      H.wait_for(function()
+        return vim.tbl_contains(s.enabled, "bacon_ls")
+      end, 3000, "bacon_ls enabled again")
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end
+  )
+
+  it("calling setup() again does not leak the debounce timers (uv timer handles stay constant)", function()
+    local rr = require("xyno_rust.rust_restart")
+    local function timers()
+      local n = 0
+      vim.uv.walk(function(h)
+        if h:get_type() == "timer" and not h:is_closing() then
+          n = n + 1
+        end
+      end)
+      return n
+    end
     local d = repo()
-    vim.cmd.edit(vim.fn.fnameescape(d .. "/src/main.rs"))
-    local buf = vim.api.nvim_get_current_buf()
-    vim.bo[buf].filetype = "rust"
-    focus()
-    settle()
-    H.eq(0, #s.enabled, "no manifest: nothing to start")
-    vim.fn.writefile({ "[package]", 'name = "t"', 'version = "0.1.0"', 'edition = "2021"' }, d .. "/Cargo.toml")
-    focus()
-    H.wait_for(function()
-      return vim.tbl_contains(s.enabled, "bacon_ls")
-    end, 3000, "bacon_ls enabled again")
-    vim.api.nvim_buf_delete(buf, { force = true })
+    local c = fake_client(s, { name = "bacon_ls", root = d })
+    attach(c)
+    local function cycle()
+      rr.setup()
+      focus()
+      rr.manifest_saved(d .. "/Cargo.toml")
+      settle(450)
+    end
+    cycle()
+    local after_first = timers()
+    for _ = 1, 8 do
+      cycle()
+    end
+    H.ok(
+      timers() <= after_first,
+      ("timer handles grew from %d to %d over 8 more setup() calls"):format(after_first, timers())
+    )
+    rr.teardown()
+    H.ok(timers() <= after_first - 2, "teardown() closed the two debounce timers")
   end)
 
   it("with a client: sweeps, runs checktime, no restart when nothing changed; debounced to one run", function()
@@ -937,7 +1096,12 @@ describe("lsp_status (fake clients)", function()
     progress(c, "r1", { kind = "end" })
     H.eq("clippy ok", status.bacon(b))
     -- an error message: failed (original handler still called), until the next run begins
-    c.handlers["window/showMessage"](nil, { type = vim.lsp.protocol.MessageType.Error, message = "cargo exited: 101" }, {}, {})
+    c.handlers["window/showMessage"](
+      nil,
+      { type = vim.lsp.protocol.MessageType.Error, message = "cargo exited: 101" },
+      {},
+      {}
+    )
     H.eq(1, #seen)
     H.eq("clippy failed", status.bacon(b))
     -- an info message does not fail it
@@ -1073,7 +1237,14 @@ describe("lsp_status (fake clients)", function()
     for _, a in ipairs(vim.api.nvim_get_autocmds({ group = LS_GROUP })) do
       events[a.event] = true
     end
-    H.eq({ LspAttach = true, LspProgress = true, TextChanged = true, TextChangedI = true, BufWipeout = true }, events)
+    H.eq({
+      LspAttach = true,
+      LspDetach = true,
+      LspProgress = true,
+      TextChanged = true,
+      TextChangedI = true,
+      BufWipeout = true,
+    }, events)
     local before = #vim.fn.timer_info()
     local b = scratch_buf()
     local c = ra_client(b, function() end)
@@ -1114,9 +1285,68 @@ describe("lsp_status (fake clients)", function()
     local b = scratch_buf()
     local c = ra_client(b, function() end)
     attach(c, b)
-    server_status(c, { health = "error", quiescent = true, message = "Failed to discover workspace.\nConsider adding the `Cargo.toml` of the workspace to the [`linkedProjects`] setting." })
+    server_status(c, {
+      health = "error",
+      quiescent = true,
+      message = "Failed to discover workspace.\nConsider adding the `Cargo.toml` of the workspace to the [`linkedProjects`] setting.",
+    })
     H.eq("RA detached", status.rust_analyzer(b))
     server_status(c, { health = "error", quiescent = true, message = "proc macro server crashed" })
     H.eq("RA error", status.rust_analyzer(b))
+  end)
+
+  it("a burst of progress events costs one redraw per loop turn, not one per event", function()
+    local b = scratch_buf()
+    local c = ra_client(b, function() end)
+    attach(c, b)
+    flush()
+    s.redraws = 0
+    for i = 1, 200 do
+      progress(c, "t", { kind = "report", title = "Indexing", percentage = i % 100 })
+    end
+    vim.wait(100, function()
+      return false
+    end, 10)
+    H.ok(s.redraws >= 1 and s.redraws <= 2, "redrawstatus calls for 200 events: " .. s.redraws)
+  end)
+
+  it("forgets the state of a client that is gone (restarts used to add one table each, for ever)", function()
+    local b = scratch_buf()
+    local before = status._state_size()
+    local gone = {}
+    for _ = 1, 5 do
+      local c = ra_client(b, function() end)
+      attach(c, b)
+      gone[#gone + 1] = c
+    end
+    H.ok(status._state_size() >= before + 5 - 1)
+    s.fakes = {} -- all five exited
+    local live = ra_client(b, function() end)
+    attach(live, b) -- the next attach prunes
+    H.ok(
+      status._state_size() <= before + 1,
+      ("state kept for dead clients: %d -> %d"):format(before, status._state_size())
+    )
+  end)
+
+  it("deps_begin twice for one workspace replaces the timers instead of piling up two more", function()
+    local function timers()
+      local n = 0
+      vim.uv.walk(function(h)
+        if h:get_type() == "timer" and not h:is_closing() then
+          n = n + 1
+        end
+      end)
+      return n
+    end
+    local root = H.tmpdir()
+    status.deps_begin(root)
+    local one = timers()
+    for _ = 1, 10 do
+      status.deps_begin(root)
+    end
+    H.eq(one, timers(), "ten more saves, same number of timers")
+    status.deps_clear(root)
+    H.eq(one - 2, timers(), "clearing closes both")
   end)
 end)

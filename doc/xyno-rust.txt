@@ -14,7 +14,11 @@ CONTENTS                                                      *xyno-rust-content
   7. Wiring it to the language servers ........ |xyno-rust-wiring|
   8. How it works ............................. |xyno-rust-how|
   9. Platforms ................................ |xyno-rust-platforms|
- 10. License and origin ....................... |xyno-rust-license|
+ 10. Workspace trust .......................... |xyno-rust-trust|
+ 11. Nothing waits on a process ............... |xyno-rust-async|
+ 12. Compatibility contract ................... |xyno-rust-contract|
+ 13. Health check ............................. |xyno-rust-health|
+ 14. License and origin ....................... |xyno-rust-license|
 
 ==============================================================================
 1. INTRODUCTION                                                      *xyno-rust*
@@ -75,6 +79,7 @@ No other plugin is required.
         routes = true,  -- xyno_rust.rust_routes
         status = true,  -- xyno_rust.lsp_status (autocommands)
         restart = true, -- xyno_rust.rust_restart (autocommands)
+        trust = true,   -- xyno_rust.trust (defines :RustTrust)
       },
     })
 <
@@ -107,6 +112,49 @@ nothing. Calling it again replaces the autocommands.
                         bench, lib) and run, test, build, bench, profile it in
                         a bottom terminal. Honours |:RustContext|.
 
+                                                                  *:RustActions*
+:RustActions            Code actions at the cursor or selection in a picker;
+                        the preview is the diff the action would make.
+                                                                 *:RustRefactor*
+:RustRefactor           The same for refactor.* actions only.
+                                                                   *:RustFixAll*
+:RustFixAll             Apply the preferred quick fixes of the buffer as one
+                        undo step. Cargo-check diagnostics are skipped while
+                        the buffer has unsaved changes (they describe the
+                        saved text); it waits for rust-analyzer to be idle.
+
+                                                                     *:RustRun*
+:RustRun [name]         Run configurations saved per project: a named cargo
+                        command with target, program arguments (after --),
+                        cargo arguments, environment variables and an
+                        optional profiler (samply, cargo flamegraph). No
+                        name opens a picker: <CR> runs, <C-e> edits, <C-x>
+                        deletes, "+ new configuration..." creates. Arguments
+                        are split into words and passed as an argv list;
+                        nothing is expanded or run through a shell line.
+                        Stored in stdpath("state")/xyno-rust-run-configs.json,
+                        Shared entries: <root>/.xynovim/run.toml, read only in a
+                        trusted workspace. Asks for workspace trust.
+:RustRunLast            Run the previous configuration again.
+:RustRunEdit [name]     Edit (or create) a configuration.
+:RustRunDelete {name}   Delete a configuration.
+:RustRunShare {name}    Copy a configuration into .xynovim/run.toml.
+
+                                                                  *:RustRename*
+:RustRename [name]      Rename with a per-file diff preview; <Tab> unticks a
+                        file, <CR> applies the rest.
+
+                                                                  *:RustUsages*
+:RustUsages             Workspace usages grouped code/import/tests/docs.
+
+                                                                 *:RustProfile*
+:RustProfile [file]     Hot functions and call tree of a perf script, collapsed
+                        stacks or perf.data. <CR> folds / jumps, E/C expand/
+                        collapse all, t toggles the hot list, q closes.
+
+                                                                *:TokioConsole*
+:TokioConsole [check]   Check the project for tokio-console and launch it.
+
                                                                     *:RustTools*
 :RustTools              Pick a workspace tool: timings, bloat, machete, deny,
                         audit, duplicate versions, coverage summary.
@@ -125,6 +173,15 @@ nothing. Calling it again replaces the autocommands.
                                                                   *:RustRestart*
 :RustRestart            Restart rust-analyzer and bacon-ls, also when one of
                         them has died.
+
+                                                                    *:RustTrust*
+:RustTrust              List the trusted workspaces; the one you select is
+                        revoked.
+:RustTrust list         Print them.
+:RustTrust add [dir]    Trust {dir} (default: the current workspace).
+:RustTrust revoke [dir] Remove the entry of {dir}.
+:RustTrust revoke-all   Remove every entry.
+:RustTrust status [dir] Say whether {dir} is trusted. See |xyno-rust-trust|.
 
 ==============================================================================
 5. KEYMAPS                                                      *xyno-rust-keymaps*
@@ -151,6 +208,27 @@ xyno_rust                                                           *xyno_rust*
     setup({opts})                    see |xyno-rust-setup|
     defaults                         the default options table
     default_keymaps                  action name -> default lhs
+    api_version                      "major.minor" contract, |xyno-rust-contract|
+    version                          plugin release
+    compatible({want})               true, or false and a reason
+
+xyno_rust.cargo                                                *xyno_rust.cargo*
+    metadata_async({root}, {cb}, {opts}?)   cb(meta) or cb(nil, err); cached,
+                                     shared by concurrent askers, 30 s timeout
+    metadata({root}, {opts}?)        blocking wrapper (waits only when cold)
+    locate_async({dir}, {stamp}, {cb})  locate({dir}, {stamp})  located(..)
+    installed_targets_async({cb})    `rustup target list --installed`, 60 s cache
+    exec({argv}, {opts}, {cb})       vim.system with a timeout that really ends
+    invalidate({root}?)  reset_caches()  pending()  config
+
+xyno_rust.trust                                                *xyno_rust.trust*
+    is_trusted({root})               boolean, entry that trusts it
+    require({root}, {what}, {cb})    cb(true|false); asks once if needed
+    ask({root}, {what}, {cb})        the prompt only
+    trust({root}, {opts}?)  revoke({root})  revoke_all()  list()
+    ra_overrides({root})             rust-analyzer settings: no build scripts,
+                                     no proc macros (empty if trusted)
+    normalize({path})  file()
 
 xyno_rust.fsutil                                              *xyno_rust.fsutil*
     rename({tmp}, {dest})            uv.fs_rename that retries on Windows
@@ -159,8 +237,12 @@ xyno_rust.fsutil                                              *xyno_rust.fsutil*
     slash({path})                    forward slashes (Windows only)
 
 xyno_rust.rust_context                                  *xyno_rust.rust_context*
-    root({path}?)                    workspace root of a path (default: the
-                                     current buffer); nil outside a crate
+    root({path}?, {opts}?)           workspace root of a path (default: the
+                                     current buffer); nil outside a crate.
+                                     Cached; { nowait = true } never waits.
+    root_async({path}, {cb})         the same without blocking
+    warm()                           ask cargo about entered Rust buffers
+    valid_feature({s})  valid_target({s})  sanitize({ctx})
     get({root})                      stored context or nil
     apply({root}, {ctx}?)            store {ctx} (nil resets), push it into the
                                      running servers, notify
@@ -179,11 +261,28 @@ xyno_rust.rust_context                                  *xyno_rust.rust_context*
 xyno_rust.rust_tasks                                      *xyno_rust.rust_tasks*
     targets()  tools()  new({name}?)  act_job()  doctests()
     samply_cmd({build}, {bin})       argv for "build, then samply record"
+    target_items({root}, {meta})     the |:RustTargets| picker items
+
+xyno_rust.action_menu                                    *xyno_rust.action_menu*
+    open({opts})  actions()  refactor()  fix_all({buf}, {opts}, {cb})
+    edit_diff({edit}, {enc}?)  plain_edit({edit})  strip_snippet({s})
+    sort({list})  items({list})  apply({action}, {cb})
+    wait_idle({buf}, {ms}, {cb})
+
+xyno_rust.run_configs                                    *xyno_rust.run_configs*
+    split_args({s})  join_args({words})  parse_env({s})  format_env({env})
+    sanitize({cfg})  load({root})  save({root}, {cfg}, {replace}?)
+    delete({root}, {name})  set_last({root}, {name})
+    build({cfg}, {ctx_flags}, {meta}?)   argv + env of a configuration
+    defaults({meta})  run({root}, {cfg}, {meta})  pick()  run_named({name}?)
+    edit({root}, {meta}, {cfg}?)  PROFILING_FLAGS  file()
 
 xyno_rust.rust_routes                                    *xyno_rust.rust_routes*
     scan_source({src})               routes of a Rust source string, as
                                      { path, kind, detail, row, col }
     collect({root})                  routes of every .rs file of a workspace
+    collect_async({root}, {cb})      the same in slices of config.slice_ms,
+                                     cached per file, shared by askers
     pick()                           the |:RustRoutes| picker
 
 xyno_rust.rust_nav                                          *xyno_rust.rust_nav*
@@ -318,7 +417,55 @@ and the root lookup accept only absolute paths that start with "/", so they do
 nothing on Windows, and the SIGCONT before quit is skipped there.
 
 ==============================================================================
-10. LICENSE AND ORIGIN                                          *xyno-rust-license*
+10. WORKSPACE TRUST                                              *xyno-rust-trust*
+
+Running a target, test, bench, doctest, samply, flamegraph, a |:RustTools|
+entry or |:ActJob| asks once per workspace root whether you trust it:
+trust it, trust everything under its parent, run once, or do not run. The
+answer is remembered in `stdpath("state")/xyno-rust-trust.json`; |:RustTrust|
+lists and revokes it. Headless (no UI), the answer is "do not run".
+
+Reading `cargo metadata --no-deps` and `cargo locate-project` needs no
+trust: neither runs build.rs, a proc macro or the configured rustc. A
+resolving `cargo metadata` (xyno_rust.crate_meta) does run a configured rustc
+wrapper, so in an untrusted workspace it overrides it through the environment
+and does not retry online.
+
+The plugin does not start the language servers; trust.ra_overrides({root})
+returns the settings that stop an untrusted workspace from running build
+scripts and proc macros, for your server config to merge. Nothing applies
+them for you.
+
+==============================================================================
+11. NOTHING WAITS ON A PROCESS                                  *xyno-rust-async*
+
+cargo metadata, cargo locate-project, rustup target list and the route scan
+run in the background (callbacks, timeouts, caches, shared requests, a scan in
+8 ms slices). Synchronous wrappers remain for other plugins:
+rust_context.root({path}) answers from the cache and waits for cargo at most
+cargo.config.wait_ms (2000) on the first call for a directory, then falls
+back to the file-system walk. root({path}, { nowait = true }) never waits.
+
+==============================================================================
+12. COMPATIBILITY CONTRACT                                    *xyno-rust-contract*
+
+require("xyno_rust").api_version is "major.minor". The major number changes
+when a function other xyno plugins call is removed or changes meaning; the
+minor number when functions are added.
+>lua
+    local ok, why = require("xyno_rust").compatible("1.1")
+<
+
+==============================================================================
+13. HEALTH CHECK                                                 *xyno-rust-health*
+
+`:checkhealth xyno-rust` reports versions, the external tools, snacks.nvim and
+the rust parser, the state files (invalid stored features and targets are
+listed), the trusted workspaces, and for the current workspace how long
+`cargo metadata --no-deps` takes and which servers run.
+
+==============================================================================
+14. LICENSE AND ORIGIN                                          *xyno-rust-license*
 
 MIT, Copyright (c) 2026 Xynorash. Extracted from xynovim
 (https://github.com/xynorash/xynovim), my Neovim configuration for Rust.

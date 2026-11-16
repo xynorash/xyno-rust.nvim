@@ -59,10 +59,27 @@ local function count_edits(buf)
   })
 end
 
+-- rust-analyzer reports progress many times a second while indexing: one redraw per tick of
+-- the loop is enough however many events arrived in it.
+local redraw_pending = false
 local function redraw()
+  if redraw_pending then
+    return
+  end
+  redraw_pending = true
   vim.schedule(function()
+    redraw_pending = false
     vim.cmd.redrawstatus()
   end)
+end
+
+--- Forget the state of clients that no longer exist (it was kept for ever: one table per restart).
+local function prune()
+  for id in pairs(state) do
+    if not vim.lsp.get_client_by_id(id) then
+      state[id] = nil
+    end
+  end
 end
 
 --- "Indexing 42%" / "Fetching" for the newest progress item of a client.
@@ -84,10 +101,78 @@ local function stopped(bufnr, name)
   return flags ~= nil and flags[name] == true
 end
 
+local ra_checked = { at = 0, ok = true }
+--- Whether a rust-analyzer binary is on PATH (looked up at most once every 5 s: the statusline asks on every redraw).
+function M.ra_installed()
+  local now = vim.uv.now()
+  if now - ra_checked.at > 5000 or ra_checked.at == 0 then
+    ra_checked = { at = now, ok = vim.fn.executable("rust-analyzer") == 1 }
+  end
+  return ra_checked.ok
+end
+
+local explained = {} -- root -> "<mtime>|<message>" already reported
+
+--- rust-analyzer says "Failed to load workspaces" and nothing else (rustaceanvim's toast adds "Run
+--- :RustLsp logFile"). Ask cargo what is wrong with the manifests and say that: a broken Cargo.toml
+--- reads "TOML parse error at line 6", a bad feature "feature `a` includes `nope`". One report per
+--- root and state of the manifest. `cargo metadata --no-deps` neither builds nor resolves dependencies,
+--- so it needs no network.
+---@param root string?
+---@param message string? rust-analyzer's own text
+function M.explain(root, message)
+  if not (root and vim.fn.executable("cargo") == 1) then
+    return
+  end
+  local stat = vim.uv.fs_stat(root .. "/Cargo.toml")
+  local key = (stat and stat.mtime.sec or 0) .. "|" .. tostring(message)
+  if explained[root] == key then
+    return
+  end
+  explained[root] = key
+  require("xyno_rust.cargo").metadata_async(root, function(meta, err)
+    if meta then
+      local first = vim.split(vim.trim(message or ""), "\n")[1]
+      return vim.notify(
+        "rust-analyzer could not load the workspace"
+          .. (first ~= "" and (": " .. first) or "")
+          .. " (cargo reads the manifests fine). :RustLsp logFile has the details.",
+        vim.log.levels.WARN,
+        { title = "rust-analyzer" }
+      )
+    end
+    local lines = {}
+    for _, l in ipairs(vim.split(tostring(err), "\n", { trimempty = true })) do
+      l = vim.trim(l)
+      if l ~= "" and l ~= "Caused by:" and not l:match("^|") and not l:match("^%d+ |") then
+        lines[#lines + 1] = (l:gsub("^error: ", ""):gsub("^%-%-> ", "at "))
+      end
+      if #lines >= 4 then
+        break
+      end
+    end
+    vim.notify(
+      "rust-analyzer cannot load this project, cargo says: "
+        .. table.concat(lines, " | ")
+        .. "\nFix Cargo.toml and save: it reloads by itself.",
+      vim.log.levels.ERROR,
+      { title = "Cargo.toml" }
+    )
+  end, { refresh = true })
+end
+
 function M.rust_analyzer(bufnr)
   local c = vim.lsp.get_clients({ bufnr = bufnr or 0, name = "rust-analyzer" })[1]
   if not c then
-    return stopped(bufnr or 0, "rust-analyzer") and "RA stopped" or nil
+    if stopped(bufnr or 0, "rust-analyzer") then
+      return "RA stopped"
+    end
+    -- no server and no binary to start: nothing else on screen says so after rustaceanvim's one toast
+    local b = bufnr or 0
+    if vim.api.nvim_buf_is_valid(b) and vim.bo[b].filetype == "rust" and not M.ra_installed() then
+      return "RA missing"
+    end
+    return nil
   end
   local s = st(c.id)
   local busy = progress_text(s)
@@ -131,7 +216,10 @@ function M.bacon(bufnr)
   -- "ok" meant "finished", also with errors on screen: say how many
   local ERROR = vim.diagnostic.severity.ERROR
   local has_ns, ns = pcall(vim.lsp.diagnostic.get_namespace, c.id)
-  local errors = has_ns and vim.api.nvim_buf_is_valid(buf) and vim.diagnostic.count(buf, { namespace = ns, severity = ERROR })[ERROR] or 0
+  local errors = has_ns
+      and vim.api.nvim_buf_is_valid(buf)
+      and vim.diagnostic.count(buf, { namespace = ns, severity = ERROR })[ERROR]
+    or 0
   if errors > 0 then
     return ("clippy %dE"):format(errors)
   end
@@ -153,11 +241,24 @@ local function ra_idle(root)
   return any
 end
 
---- Ends the pending resolution of `root` (all of them without argument).
+local function stop_timers(d)
+  for _, t in ipairs(d and d.timers or {}) do
+    if not t:is_closing() then
+      t:stop()
+      t:close()
+    end
+  end
+end
+
+--- Ends the pending resolution of `root` (all of them without argument) and closes its timers.
 function M.deps_clear(root)
   if root then
+    stop_timers(deps[root])
     deps[root] = nil
   else
+    for _, d in pairs(deps) do
+      stop_timers(d)
+    end
     deps = {}
   end
   redraw()
@@ -165,6 +266,8 @@ end
 
 --- A Cargo.toml/Cargo.lock under `root` was saved: show "deps resolving" until
 --- rust-analyzer has reloaded the workspace. Never sticks: see the header.
+--- (A second save in the same workspace replaces the first one's timers: a burst of saves used to
+--- leave two timers per save registered for up to 120 s.)
 ---@param root string workspace root
 ---@param buf integer? the manifest buffer (its wipe ends the wait)
 function M.deps_begin(root, buf)
@@ -175,16 +278,18 @@ function M.deps_begin(root, buf)
       busy = true -- already loading: its next quiescent=true is the end
     end
   end
-  deps[root] = { buf = buf, busy = busy, token = token }
+  stop_timers(deps[root])
+  local d = { buf = buf, busy = busy, token = token, timers = {} }
+  deps[root] = d
   local function alive()
     return deps[root] and deps[root].token == token
   end
-  vim.defer_fn(function()
+  d.timers[1] = vim.defer_fn(function()
     if alive() and not deps[root].busy and (ra_idle(root) or #vim.lsp.get_clients({ name = "rust-analyzer" }) == 0) then
       M.deps_clear(root)
     end
   end, DEPS_GRACE_MS)
-  vim.defer_fn(function()
+  d.timers[2] = vim.defer_fn(function()
     if alive() then
       M.deps_clear(root)
     end
@@ -220,13 +325,33 @@ local function deps_status(client, quiescent)
   end
 end
 
+--- Parts a config adds in front of the server states (e.g. "restricted" for an untrusted workspace).
+--- fn(bufnr) -> string ("" for nothing). A failing part is skipped.
+local extra = {}
+function M.add_part(fn)
+  if not vim.tbl_contains(extra, fn) then
+    table.insert(extra, fn)
+  end
+end
+
 --- Combined lualine string ("" hides the component outside Rust buffers).
 function M.component()
   local parts = {}
+  for _, f in ipairs(extra) do
+    local ok, s = pcall(f, vim.api.nvim_get_current_buf())
+    if ok and type(s) == "string" and s ~= "" then
+      parts[#parts + 1] = s
+    end
+  end
   for _, f in ipairs({ M.deps, M.rust_analyzer, M.bacon }) do
     parts[#parts + 1] = f()
   end
   return table.concat(parts, " | ")
+end
+
+--- Number of clients with remembered state (for the health check and the specs).
+function M._state_size()
+  return vim.tbl_count(state)
 end
 
 function M.setup()
@@ -235,6 +360,7 @@ function M.setup()
   vim.api.nvim_create_autocmd("LspAttach", {
     group = group,
     callback = function(ev)
+      prune() -- a restart leaves the old client's state behind
       local client = vim.lsp.get_client_by_id(ev.data.client_id)
       if not client then
         return
@@ -272,6 +398,15 @@ function M.setup()
           if result then
             s.health, s.quiescent, s.message = result.health, result.quiescent, result.message
             deps_status(client, result.quiescent)
+            if
+              result.health == "error"
+              and result.quiescent
+              and not (result.message or ""):find("Failed to discover workspace", 1, true)
+            then
+              vim.schedule(function()
+                M.explain(client.root_dir or (client.config or {}).root_dir, result.message)
+              end)
+            end
             redraw()
           end
           if orig then
@@ -282,9 +417,17 @@ function M.setup()
     end,
   })
 
+  vim.api.nvim_create_autocmd("LspDetach", {
+    group = group,
+    callback = function()
+      vim.schedule(prune) -- the client is dropped from the list a tick after the detach
+    end,
+  })
+
   vim.api.nvim_create_autocmd("BufWipeout", {
     group = group,
     callback = function(ev)
+      edits[ev.buf] = nil
       for root, d in pairs(deps) do
         if d.buf == ev.buf then
           M.deps_clear(root)

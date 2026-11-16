@@ -58,11 +58,11 @@ ts_describe("rust_routes.scan_source", function()
 
   it("returns {path, kind, detail, row, col} sorted by row, 0-based position of the string content", function()
     local src = table.concat({
-      'fn app() -> Router {', -- row 0
+      "fn app() -> Router {", -- row 0
       '    Router::new().route("/b", get(b))', -- row 1
-      '}',
+      "}",
       '#[get("/a")]', -- row 3
-      'async fn a() {}',
+      "async fn a() {}",
     }, "\n")
     local items = scan(src)
     H.eq(2, #items)
@@ -101,8 +101,7 @@ ts_describe("rust_routes.scan_source", function()
   end)
 
   it("attribute routes: kind is the upper-cased verb, detail the following fn name", function()
-    local verbs =
-      { "get", "post", "put", "delete", "patch", "head", "options", "trace", "connect", "route" }
+    local verbs = { "get", "post", "put", "delete", "patch", "head", "options", "trace", "connect", "route" }
     for _, v in ipairs(verbs) do
       local items = scan(('#[%s("/x")]\nasync fn h_%s() {}\n'):format(v, v))
       H.eq({ v:upper() .. " /x h_" .. v }, summary(items), v)
@@ -115,7 +114,7 @@ ts_describe("rust_routes.scan_source", function()
       "async fn create() {}",
       '#[get("/b/<id>")]',
       "fn rocket_get(id: u32) {}",
-      '#[handler]',
+      "#[handler]",
       "fn poem_unrelated() {}",
       '#[get("/c")]',
       "async fn poem_get() -> String { String::new() }",
@@ -132,13 +131,13 @@ ts_describe("rust_routes.scan_source", function()
 
   it("ignores attributes that are not HTTP verbs", function()
     local src = table.concat({
-      '#[derive(Debug)]',
+      "#[derive(Debug)]",
       "struct S;",
-      '#[cfg(test)]',
+      "#[cfg(test)]",
       "mod t {}",
-      '#[tokio::main]',
+      "#[tokio::main]",
       "async fn main() {}",
-      '#[test]',
+      "#[test]",
       "fn t() {}",
       '#[allow("x")]',
       "fn q() {}",
@@ -157,7 +156,7 @@ ts_describe("rust_routes.scan_source", function()
     local src = table.concat({
       '#[get("/x")]',
       "#[allow(clippy::unused_async)]",
-      '#[tracing::instrument]',
+      "#[tracing::instrument]",
       "async fn h() {}",
     }, "\n")
     H.eq({ "GET /x h" }, summary(scan(src)))
@@ -170,7 +169,7 @@ ts_describe("rust_routes.scan_source", function()
 
   it("returns {} for an empty string and never raises on junk", function()
     H.eq({}, scan(""))
-    local ok, res = pcall(scan, "}}} ((( .route( #[get( \"")
+    local ok, res = pcall(scan, '}}} ((( .route( #[get( "')
     H.ok(ok, "scan_source raised on garbage")
     H.eq("table", type(res))
     -- junk is not turned into a route
@@ -198,7 +197,7 @@ ts_describe("rust_routes.scan_source", function()
       "fn cfg(c: &mut web::ServiceConfig) {",
       '    c.service(web::resource("/res").route(web::get().to(h)));',
       "}",
-      "fn m() { routes![index, about]; my_route!(\"/m\", h); }",
+      'fn m() { routes![index, about]; my_route!("/m", h); }',
     }, "\n")
     local items = scan(src)
     -- web::resource("/res") produces nothing; its inner .route(...) has a
@@ -352,6 +351,7 @@ ts_describe("rust_routes.pick", function()
     stub_snacks()
     local cap = H.capture_notify()
     R.pick()
+    H.drain()
     cap.restore()
     H.eq({ { msg = "no Cargo.toml found", level = vim.log.levels.WARN } }, cap.list)
     H.eq(0, #picked)
@@ -363,6 +363,7 @@ ts_describe("rust_routes.pick", function()
     stub_snacks()
     local cap = H.capture_notify()
     vim.cmd("RustRoutes")
+    H.drain()
     cap.restore()
     H.eq({
       { msg = 'no routes found (.route("/p", ..) or #[get("/p")])', level = vim.log.levels.INFO },
@@ -379,6 +380,7 @@ ts_describe("rust_routes.pick", function()
     stub_snacks()
     local cap = H.capture_notify()
     vim.cmd("RustRoutes")
+    H.drain()
     cap.restore()
     H.eq({}, cap.list)
     H.eq(1, #picked)
@@ -396,21 +398,22 @@ ts_describe("rust_routes.pick", function()
     end
   end)
 
-  it("format() returns 4 chunks: kind padded to 7 (Keyword), route (String), detail (Function), rel (Comment)", function()
+  it("format() returns 4 chunks: kind padded to 7 (XynoRustRouteKind), route, detail, rel", function()
     local dir = crate({ ["src/main.rs"] = 'fn a(){ r.route("/m", get(m)); }\n' })
     vim.cmd.edit(vim.fn.fnameescape(dir .. "/src/main.rs"))
     stub_snacks()
     R.pick()
+    H.drain()
     local p = H.ok(picked[1], "picker was not opened")
     local chunks = p.format(p.items[1])
     H.eq({
-      { "ROUTE  ", "Keyword" },
-      { "/m  ", "String" },
-      { "get(m)  ", "Function" },
-      { "src/main.rs", "Comment" },
+      { "ROUTE  ", "XynoRustRouteKind" },
+      { "/m  ", "XynoRustRoutePath" },
+      { "get(m)  ", "XynoRustRouteDetail" },
+      { "src/main.rs", "XynoRustRouteFile" },
     }, chunks)
     H.eq(7, #chunks[1][1])
-    H.eq({ "GET    ", "Keyword" }, p.format({ kind = "GET", route = "/", detail = "d", rel = "r" })[1])
+    H.eq({ "GET    ", "XynoRustRouteKind" }, p.format({ kind = "GET", route = "/", detail = "d", rel = "r" })[1])
   end)
 end)
 
@@ -418,25 +421,22 @@ ts_describe("mixed-style scratch crate (README verification)", function()
   it("lists 4 routes with the right verbs, handlers and lines", function()
     local dir = H.tmpdir()
     write(dir .. "/Cargo.toml", '[package]\nname = "scratch"\nversion = "0.1.0"\nedition = "2021"\n')
-    write(
-      dir .. "/src/main.rs",
-      table.concat({
-        "use axum::{routing::get, Router};", -- 1
-        "", -- 2
-        '#[actix_web::post("/orders")]', -- 3
-        "async fn create_order() {}", -- 4
-        "", -- 5
-        "fn app() -> Router {", -- 6
-        "    Router::new()", -- 7
-        '        .route("/health", get(health))', -- 8
-        '        .route("/users/{id}", get(show).delete(remove))', -- 9
-        "}", -- 10
-        "",
-        '#[get("/ping")]',
-        "#[allow(dead_code)]",
-        "async fn ping() {}",
-      }, "\n") .. "\n"
-    )
+    write(dir .. "/src/main.rs", table.concat({
+      "use axum::{routing::get, Router};", -- 1
+      "", -- 2
+      '#[actix_web::post("/orders")]', -- 3
+      "async fn create_order() {}", -- 4
+      "", -- 5
+      "fn app() -> Router {", -- 6
+      "    Router::new()", -- 7
+      '        .route("/health", get(health))', -- 8
+      '        .route("/users/{id}", get(show).delete(remove))', -- 9
+      "}", -- 10
+      "",
+      '#[get("/ping")]',
+      "#[allow(dead_code)]",
+      "async fn ping() {}",
+    }, "\n") .. "\n")
     vim.cmd.cd(vim.fn.fnameescape(dir))
     local items = R.collect(dir)
     table.sort(items, function(a, b)

@@ -8,6 +8,13 @@ require("xyno_rust").setup()
 local rc = require("xyno_rust.rust_context")
 local tasks = require("xyno_rust.rust_tasks")
 
+--- The cargo flamegraph command of an item: the profiling profile flags, then `rest`.
+local function flame(rest)
+  local t = { "cargo", "flamegraph", "--profile", "profiling" }
+  vim.list_extend(t, require("xyno_rust.run_configs").PROFILING_FLAGS)
+  return vim.list_extend(t, rest)
+end
+
 -- ------------------------------------------------------------------- stubs
 
 local restores = {}
@@ -27,6 +34,25 @@ local function unstub_all()
   end
   restores = {}
 end
+
+-- The terminal tests are about what runs; the trust gate has its own spec (trust_spec.lua). Here the
+-- trust question is answered with "Run this once" (nothing is stored), other prompts pass through.
+before_each(function()
+  local orig = vim.ui.select
+  vim.ui.select = function(items, opts, on_choice)
+    if type(opts.prompt) == "string" and opts.prompt:find("^Trust ") then
+      for _, c in ipairs(items) do
+        if c[2] == "once" then
+          return on_choice(c)
+        end
+      end
+    end
+    return orig(items, opts, on_choice)
+  end
+  restores[#restores + 1] = function()
+    vim.ui.select = orig
+  end
+end)
 
 after_each(function()
   unstub_all()
@@ -82,6 +108,11 @@ local function fake_metadata(meta)
   stub(vim, "system", function(cmd, opts, cb)
     if cmd[1] == "cargo" and cmd[2] == "metadata" then
       local res = { code = 0, stdout = vim.json.encode(meta), stderr = "" }
+      if cb then
+        vim.schedule(function()
+          cb(res)
+        end)
+      end
       return {
         wait = function()
           return res
@@ -160,6 +191,7 @@ describe(":RustTargets errors", function()
     local n = H.capture_notify()
     local cap = capture_picker()
     vim.cmd("RustTargets")
+    H.drain()
     H.eq(1, #n.list)
     H.eq("no Cargo.toml found", n.list[1].msg)
     H.eq(vim.log.levels.WARN, n.list[1].level)
@@ -175,6 +207,7 @@ describe(":RustTargets errors", function()
     local n = H.capture_notify()
     local cap = capture_picker()
     vim.cmd("RustTargets")
+    H.drain()
     H.eq(1, #n.list)
     H.match(n.list[1].msg, "^cargo metadata failed: ")
     H.match(n.list[1].msg, "Cargo.toml", true, "carries cargo's stderr")
@@ -195,31 +228,35 @@ describe(":RustTargets items", function()
     local dir = open_all()
     local cap = capture_picker()
     vim.cmd("RustTargets")
+    H.drain()
     return H.ok(cap.opts, "picker was not opened"), dir
   end
 
-  it("builds run/test/build + samply + flamegraph for a bin, run/build for an example, test, bench, and the lib trio", function()
-    local opts = targets_for_all(nil)
-    local t = vim.tbl_map(function(i)
-      return i.text
-    end, opts.items)
-    table.sort(t)
-    H.eq({
-      "bench  bench bn (rtt_all)",
-      "build  bin tool (rtt_all)",
-      "build  example ex (rtt_all)",
-      "build  lib rtt_all (rtt_all)",
-      "doc-test  lib rtt_all (rtt_all)",
-      "flamegraph  bin tool (rtt_all)",
-      "run  bin tool (rtt_all)",
-      "run  example ex (rtt_all)",
-      "samply  bin tool (rtt_all)",
-      "test  bin tool (rtt_all)",
-      "test  lib rtt_all (rtt_all)",
-      "test  test it (rtt_all)",
-    }, t)
-    H.eq("text", opts.format)
-  end)
+  it(
+    "builds run/test/build + samply + flamegraph for a bin, run/build for an example, test, bench, and the lib trio",
+    function()
+      local opts = targets_for_all(nil)
+      local t = vim.tbl_map(function(i)
+        return i.text
+      end, opts.items)
+      table.sort(t)
+      H.eq({
+        "bench  bench bn (rtt_all)",
+        "build  bin tool (rtt_all)",
+        "build  example ex (rtt_all)",
+        "build  lib rtt_all (rtt_all)",
+        "doc-test  lib rtt_all (rtt_all)",
+        "flamegraph  bin tool (rtt_all)",
+        "run  bin tool (rtt_all)",
+        "run  example ex (rtt_all)",
+        "samply  bin tool (rtt_all)",
+        "test  bin tool (rtt_all)",
+        "test  lib rtt_all (rtt_all)",
+        "test  test it (rtt_all)",
+      }, t)
+      H.eq("text", opts.format)
+    end
+  )
 
   it("treats proc-macro, rlib, cdylib, staticlib and dylib targets as libs", function()
     local kinds = { "proc-macro", "rlib", "cdylib", "staticlib", "dylib" }
@@ -230,10 +267,14 @@ describe(":RustTargets items", function()
     local dir = H.fixture("rust-tasks-tools-all")
     vim.cmd.cd(vim.fn.fnameescape(dir))
     H.open(dir .. "/src/main.rs")
-    fake_metadata({ target_directory = dir .. "/target", packages = { { name = "p", features = {}, targets = targets } } })
+    fake_metadata({
+      target_directory = dir .. "/target",
+      packages = { { name = "p", features = {}, targets = targets } },
+    })
     with_ctx(nil)
     local cap = capture_picker()
     vim.cmd("RustTargets")
+    H.drain()
     H.eq(#kinds * 3, #cap.opts.items)
     for _, k in ipairs(kinds) do
       local n = "t_" .. k:gsub("%-", "_")
@@ -259,7 +300,10 @@ describe(":RustTargets items", function()
     local ctx = { all = false, no_default = true, features = { "b" }, target = "x86_64-unknown-linux-gnu" }
     local opts = targets_for_all(ctx)
     local function with(cmd)
-      return vim.list_extend(cmd, { "--no-default-features", "--features", "b", "--target", "x86_64-unknown-linux-gnu" })
+      return vim.list_extend(
+        cmd,
+        { "--no-default-features", "--features", "b", "--target", "x86_64-unknown-linux-gnu" }
+      )
     end
     H.eq(with({ "cargo", "run", "-p", "rtt_all", "--bin", "tool" }), item(opts, "run  bin").cmd)
     H.eq(with({ "cargo", "test", "-p", "rtt_all", "--lib" }), item(opts, "test  lib").cmd)
@@ -271,9 +315,13 @@ describe(":RustTargets items", function()
     H.need_posix("the samply item is `sh -c` on POSIX and a cmd.exe line on Windows")
     local opts, dir = targets_for_all(nil)
     local meta = vim.json.decode(
-      vim.system({ "cargo", "metadata", "--format-version", "1", "--no-deps" }, { cwd = dir, text = true }):wait().stdout
+      vim
+        .system({ "cargo", "metadata", "--format-version", "1", "--no-deps" }, { cwd = dir, text = true })
+        :wait().stdout
     )
-    local build = { "cargo", "build", "--profile", "profiling", "-p", "rtt_all", "--bin", "tool", "--all-features" }
+    local build =
+      vim.list_extend({ "cargo", "build", "--profile", "profiling" }, require("xyno_rust.run_configs").PROFILING_FLAGS)
+    vim.list_extend(build, { "-p", "rtt_all", "--bin", "tool", "--all-features" })
     local expected = table.concat(vim.tbl_map(vim.fn.shellescape, build), " ")
       .. " && samply record "
       .. vim.fn.shellescape(meta.target_directory .. "/profiling/tool")
@@ -293,6 +341,7 @@ describe(":RustTargets items", function()
     with_ctx(nil)
     local cap = capture_picker()
     vim.cmd("RustTargets")
+    H.drain()
     local cmd = item(cap.opts, "samply").cmd
     H.eq("sh", cmd[1])
     H.eq("-c", cmd[2])
@@ -302,24 +351,18 @@ describe(":RustTargets items", function()
 
   it("the flamegraph item replaces --all-features by --features <non-default features, sorted>", function()
     local opts = targets_for_all(nil)
-    H.eq(
-      { "cargo", "flamegraph", "--profile", "profiling", "-p", "rtt_all", "--bin", "tool", "--features", "a,b" },
-      item(opts, "flamegraph").cmd
-    )
+    H.eq(flame({ "-p", "rtt_all", "--bin", "tool", "--features", "a,b" }), item(opts, "flamegraph").cmd)
   end)
 
   it("the flamegraph item keeps the target flag and leaves a feature-list context alone", function()
     local opts = targets_for_all({ all = true, target = "x86_64-unknown-linux-gnu" })
-    H.eq({
-      "cargo", "flamegraph", "--profile", "profiling", "-p", "rtt_all", "--bin", "tool",
-      "--target", "x86_64-unknown-linux-gnu", "--features", "a,b",
-    }, item(opts, "flamegraph").cmd)
+    H.eq(
+      flame({ "-p", "rtt_all", "--bin", "tool", "--target", "x86_64-unknown-linux-gnu", "--features", "a,b" }),
+      item(opts, "flamegraph").cmd
+    )
     unstub_all()
     local opts2 = targets_for_all({ all = false, features = { "b" } })
-    H.eq(
-      { "cargo", "flamegraph", "--profile", "profiling", "-p", "rtt_all", "--bin", "tool", "--features", "b" },
-      item(opts2, "flamegraph").cmd
-    )
+    H.eq(flame({ "-p", "rtt_all", "--bin", "tool", "--features", "b" }), item(opts2, "flamegraph").cmd)
   end)
 
   it("the flamegraph item adds no --features for a package without features", function()
@@ -333,7 +376,8 @@ describe(":RustTargets items", function()
     with_ctx(nil)
     local cap = capture_picker()
     vim.cmd("RustTargets")
-    H.eq({ "cargo", "flamegraph", "--profile", "profiling", "-p", "p", "--bin", "b" }, item(cap.opts, "flamegraph").cmd)
+    H.drain()
+    H.eq(flame({ "-p", "p", "--bin", "b" }), item(cap.opts, "flamegraph").cmd)
   end)
 
   it("titles the picker with the context description", function()
@@ -381,6 +425,7 @@ describe("term (through :RustTools confirm)", function()
     local cap = capture_picker()
     local term = capture_term(existing)
     vim.cmd("RustTools")
+    H.drain()
     local it = cap.opts.items[1]
     cap.opts.confirm({ close = function() end }, it)
     return term, it, dir
@@ -406,6 +451,7 @@ describe("term (through :RustTools confirm)", function()
     local cap = capture_picker()
     local term = capture_term(nil)
     vim.cmd("RustTools")
+    H.drain()
     cap.opts.confirm({ close = function() end }, cap.opts.items[1])
     cap.opts.confirm({ close = function() end }, cap.opts.items[2])
     H.eq(2, #term.opened)
@@ -454,6 +500,7 @@ describe(":RustNew", function()
     end)
     local n = H.capture_notify()
     vim.cmd("RustNew mybin")
+    H.drain()
     H.eq({ items = { "bin", "lib" }, prompt = "Crate type" }, asked)
     H.eq(1, vim.fn.filereadable(dir .. "/mybin/src/main.rs"))
     H.eq(dir .. "/mybin/src/main.rs", vim.api.nvim_buf_get_name(0))
@@ -467,6 +514,7 @@ describe(":RustNew", function()
     end)
     local n = H.capture_notify()
     vim.cmd("RustNew mylib")
+    H.drain()
     H.eq(1, vim.fn.filereadable(dir .. "/mylib/src/lib.rs"))
     H.eq(0, vim.fn.filereadable(dir .. "/mylib/src/main.rs"))
     H.eq(dir .. "/mylib/src/lib.rs", vim.api.nvim_buf_get_name(0))
@@ -485,6 +533,7 @@ describe(":RustNew", function()
     end)
     H.capture_notify()
     vim.cmd("RustNew")
+    H.drain()
     H.eq("New crate name: ", prompt)
     H.eq(1, vim.fn.filereadable(dir .. "/asked/src/main.rs"))
   end)
@@ -499,10 +548,12 @@ describe(":RustNew", function()
       cb("")
     end)
     vim.cmd("RustNew")
+    H.drain()
     stub(vim.ui, "input", function(_, cb)
       cb(nil)
     end)
     vim.cmd("RustNew")
+    H.drain()
     H.not_ok(selected, "no type question for an empty name")
     H.eq({}, vim.fn.readdir(dir))
   end)
@@ -514,6 +565,7 @@ describe(":RustNew", function()
     end)
     local n = H.capture_notify()
     vim.cmd("RustNew -dash")
+    H.drain()
     H.eq(1, #n.list)
     H.eq(vim.log.levels.ERROR, n.list[1].level)
     H.match(n.list[1].msg, "cannot start with '-'", true)
@@ -526,6 +578,7 @@ describe(":RustNew", function()
       cb(nil)
     end)
     vim.cmd("RustNew nothing")
+    H.drain()
     H.eq({}, vim.fn.readdir(dir))
   end)
 
@@ -538,6 +591,7 @@ describe(":RustNew", function()
     end)
     local n = H.capture_notify()
     vim.cmd("RustNew taken")
+    H.drain()
     H.eq(1, #n.list)
     H.eq(vim.log.levels.ERROR, n.list[1].level)
     H.match(n.list[1].msg, "already exists", true)
@@ -552,6 +606,7 @@ describe(":RustTools", function()
     local dir = open_all()
     local cap = capture_picker()
     vim.cmd("RustTools")
+    H.drain()
     return H.ok(cap.opts, "picker was not opened"), dir
   end
 
@@ -561,15 +616,31 @@ describe(":RustTools", function()
     local opts, dir = tools(ctx)
     H.eq("Cargo tools", opts.title)
     H.eq("text", opts.format)
-    local cov = { "cargo", "llvm-cov", "--workspace", "--ignore-run-fail", "--summary-only", "--features", "a", "--target", "x86_64-unknown-linux-gnu" }
+    local cov = {
+      "cargo",
+      "llvm-cov",
+      "--workspace",
+      "--ignore-run-fail",
+      "--summary-only",
+      "--features",
+      "a",
+      "--target",
+      "x86_64-unknown-linux-gnu",
+    }
     local flags = { "--features", "a", "--target", "x86_64-unknown-linux-gnu" }
     local expected = {
-      { "timings (cargo build --timings; report in target/cargo-timings)", vim.list_extend({ "cargo", "build", "--timings" }, flags) },
+      {
+        "timings (cargo build --timings; report in target/cargo-timings)",
+        vim.list_extend({ "cargo", "build", "--timings" }, flags),
+      },
       { "bloat by crate (release)", vim.list_extend({ "cargo", "bloat", "--release", "--crates" }, flags) },
       { "bloat by function (release, top 30)", vim.list_extend({ "cargo", "bloat", "--release", "-n", "30" }, flags) },
       { "unused dependencies (cargo machete)", { "cargo", "machete" } },
       { "deny: fetch advisory DB", { "cargo", "deny", "fetch" } },
-      { "deny: check all (no deny.toml: licenses skipped)", { "cargo", "deny", "check", "advisories", "bans", "sources" } },
+      {
+        "deny: check all (no deny.toml: licenses skipped)",
+        { "cargo", "deny", "check", "advisories", "bans", "sources" },
+      },
       { "audit (RustSec)", { "cargo", "audit" } },
       { "duplicate dependency versions", { "cargo", "tree", "-d" } },
       { "coverage report (summary in terminal)", cov },
@@ -596,6 +667,7 @@ describe(":RustTools", function()
     with_ctx(nil)
     local cap = capture_picker()
     vim.cmd("RustTools")
+    H.drain()
     local opts2 = H.ok(cap.opts, "picker was not opened")
     H.eq("deny: check all", opts2.items[6].text)
     H.eq({ "cargo", "deny", "check" }, opts2.items[6].cmd)
@@ -605,11 +677,17 @@ describe(":RustTools", function()
   it("the default context puts --all-features on the coverage entry, repeated calls do not accumulate flags", function()
     H.need_rust()
     local opts = tools(nil)
-    H.eq({ "cargo", "llvm-cov", "--workspace", "--ignore-run-fail", "--summary-only", "--all-features" }, opts.items[9].cmd)
+    H.eq(
+      { "cargo", "llvm-cov", "--workspace", "--ignore-run-fail", "--summary-only", "--all-features" },
+      opts.items[9].cmd
+    )
     H.eq({ "cargo", "build", "--timings", "--all-features" }, opts.items[1].cmd)
     unstub_all()
     local opts2 = tools(nil)
-    H.eq({ "cargo", "llvm-cov", "--workspace", "--ignore-run-fail", "--summary-only", "--all-features" }, opts2.items[9].cmd)
+    H.eq(
+      { "cargo", "llvm-cov", "--workspace", "--ignore-run-fail", "--summary-only", "--all-features" },
+      opts2.items[9].cmd
+    )
   end)
 
   it("warns outside a crate", function()
@@ -617,6 +695,7 @@ describe(":RustTools", function()
     local n = H.capture_notify()
     local cap = capture_picker()
     vim.cmd("RustTools")
+    H.drain()
     H.eq(1, #n.list)
     H.eq("no Cargo.toml found", n.list[1].msg)
     H.eq(vim.log.levels.WARN, n.list[1].level)
@@ -662,6 +741,7 @@ describe(":ActJob", function()
     local term = capture_term(nil)
     goto_line("runs-on:") -- a key inside job `smoke`
     vim.cmd("ActJob")
+    H.drain()
     H.eq(1, #term.opened)
     H.eq({ "act", "-j", "smoke", "-W", file }, term.opened[1].cmd)
     H.eq(repo, term.opened[1].opts.cwd)
@@ -672,6 +752,7 @@ describe(":ActJob", function()
     local term = capture_term(nil)
     goto_line("Startup smoke test")
     vim.cmd("ActJob")
+    H.drain()
     H.eq("smoke", term.opened[1].cmd[3])
   end)
 
@@ -696,10 +777,12 @@ describe(":ActJob", function()
     local term = capture_term(nil)
     vim.api.nvim_win_set_cursor(0, { 10, 10 })
     vim.cmd("ActJob")
+    H.drain()
     H.eq({ "act", "-j", "second", "-W", file }, term.opened[1].cmd)
     H.eq(vim.uv.cwd(), term.opened[1].opts.cwd)
     vim.api.nvim_win_set_cursor(0, { 4, 10 })
     vim.cmd("ActJob")
+    H.drain()
     H.eq("first", term.opened[2].cmd[3])
   end)
 
@@ -709,6 +792,7 @@ describe(":ActJob", function()
     local n = H.capture_notify()
     vim.api.nvim_win_set_cursor(0, { 1, 0 }) -- `name: CI`
     vim.cmd("ActJob")
+    H.drain()
     H.eq(0, #term.opened)
     H.eq(1, #n.list)
     H.eq("cursor is not inside a job under `jobs:`", n.list[1].msg)
@@ -716,6 +800,7 @@ describe(":ActJob", function()
     -- the `permissions:` block is not a job either
     goto_line("contents: read")
     vim.cmd("ActJob")
+    H.drain()
     H.eq(0, #term.opened)
     H.eq(2, #n.list)
   end)
@@ -730,6 +815,7 @@ describe("rust_tasks.doctests", function()
     local dir = open_all()
     local term = capture_term(nil)
     tasks.doctests()
+    H.drain()
     H.eq(1, #term.opened)
     H.eq({ "cargo", "test", "--doc", "--workspace", "--features", "b" }, term.opened[1].cmd)
     H.eq(dir, term.opened[1].opts.cwd)
@@ -742,6 +828,7 @@ describe("rust_tasks.doctests", function()
     open_all()
     local term = capture_term(nil)
     tasks.doctests()
+    H.drain()
     H.eq({ "cargo", "test", "--doc", "--workspace", "--all-features" }, term.opened[1].cmd)
   end)
 
@@ -750,6 +837,7 @@ describe("rust_tasks.doctests", function()
     local term = capture_term(nil)
     local n = H.capture_notify()
     tasks.doctests()
+    H.drain()
     H.eq(0, #term.opened)
     H.eq("no Cargo.toml found", n.list[1].msg)
     H.eq(vim.log.levels.WARN, n.list[1].level)

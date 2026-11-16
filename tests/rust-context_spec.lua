@@ -69,8 +69,14 @@ local function stub_system(handlers)
     if not h then
       return orig(cmd, opts, ...)
     end
-    local rec = { cmd = cmd, opts = opts }
+    local rec = { cmd = cmd, opts = opts, async = type(...) == "function" }
     calls[#calls + 1] = rec
+    local cb = ...
+    if cb then -- async form: answer on a later loop turn like the real thing
+      vim.schedule(function()
+        cb(h(cmd, opts))
+      end)
+    end
     return {
       wait = function(_, ms)
         rec.wait = ms
@@ -175,11 +181,13 @@ local function reset_world()
   stop_all_clients()
   pcall(vim.cmd, "silent! %bwipeout!")
   vim.fn.delete(state_file)
+  require("xyno_rust.cargo").reset_caches() -- (answers of stubbed cargo/rustup must not leak into the next test)
 end
 
 describe("rust_context", function()
   before_each(function()
     vim.fn.delete(state_file)
+    require("xyno_rust.cargo").reset_caches()
   end)
   after_each(reset_world)
 
@@ -217,7 +225,13 @@ describe("rust_context", function()
       H.ok(pcall(rc.describe, ctx))
       H.ok(pcall(rc.ra_cargo, ctx))
       H.ok(pcall(rc.bacon_args, ctx))
-      write_text(state_file, vim.json.encode({ [basic] = { all = false, features = { "a", 3, "", "b" }, target = "wasm32-unknown-unknown" }, other = 7 }))
+      write_text(
+        state_file,
+        vim.json.encode({
+          [basic] = { all = false, features = { "a", 3, "", "b" }, target = "wasm32-unknown-unknown" },
+          other = 7,
+        })
+      )
       H.eq({ all = false, features = { "a", "b" }, target = "wasm32-unknown-unknown" }, rc.get(basic))
       H.is_nil(rc.get("other"))
       write_text(state_file, "[1,2")
@@ -242,7 +256,10 @@ describe("rust_context", function()
       write_text(ws .. "/Cargo.toml", '[workspace]\nmembers = ["a"]\nexclude = ["ex", "nested"]\n')
       write_text(ws .. "/a/Cargo.toml", '[package]\nname = "a"\nversion = "0.1.0"\nedition = "2021"\n')
       write_text(ws .. "/ex/Cargo.toml", '[package]\nname = "ex"\nversion = "0.1.0"\nedition = "2021"\n')
-      write_text(ws .. "/nested/Cargo.toml", '[package]\nname = "nested"\nversion = "0.1.0"\nedition = "2021"\n[workspace]\n')
+      write_text(
+        ws .. "/nested/Cargo.toml",
+        '[package]\nname = "nested"\nversion = "0.1.0"\nedition = "2021"\n[workspace]\n'
+      )
       for _, d in ipairs({ "a", "ex", "nested" }) do
         write_text(ws .. "/" .. d .. "/src/lib.rs", "")
       end
@@ -276,12 +293,14 @@ describe("rust_context", function()
   -- ----------------------------------------------------------------- state
 
   describe("state file", function()
-    it("concurrent nvims applying different roots lose none (8 x 15 applies; was 79 of 160 without the lock)", function()
-      local state = H.tmpdir()
-      local script = H.tmpdir() .. "/many.lua"
-      write_text(
-        script,
-        ([[
+    it(
+      "concurrent nvims applying different roots lose none (8 x 15 applies; was 79 of 160 without the lock)",
+      function()
+        local state = H.tmpdir()
+        local script = H.tmpdir() .. "/many.lua"
+        write_text(
+          script,
+          ([[
 package.path = %q .. "/lua/?.lua;" .. package.path
 local rc = require("xyno_rust.rust_context")
 local id = tonumber(arg[1])
@@ -289,31 +308,32 @@ for i = 1, 15 do
   rc.apply(("/proj/%%d/%%d"):format(id, i), { all = false, features = { "f" .. i }, no_default = false })
 end
 ]]):format(H.repo)
-      )
-      local jobs = {}
-      for id = 1, 8 do
-        jobs[id] = vim.system({ vim.fn.exepath("nvim"), "--headless", "-u", "NONE", "-l", script, tostring(id) }, {
-          env = {
-            XDG_STATE_HOME = state,
-            XDG_CONFIG_HOME = state,
-            XDG_DATA_HOME = state,
-            XDG_CACHE_HOME = state,
-            LOCALAPPDATA = state, -- Windows: stdpath("state") is $LOCALAPPDATA/nvim-data
-          },
-          text = true,
-        })
+        )
+        local jobs = {}
+        for id = 1, 8 do
+          jobs[id] = vim.system({ vim.fn.exepath("nvim"), "--headless", "-u", "NONE", "-l", script, tostring(id) }, {
+            env = {
+              XDG_STATE_HOME = state,
+              XDG_CONFIG_HOME = state,
+              XDG_DATA_HOME = state,
+              XDG_CACHE_HOME = state,
+              LOCALAPPDATA = state, -- Windows: stdpath("state") is $LOCALAPPDATA/nvim-data
+            },
+            text = true,
+          })
+        end
+        for id, j in ipairs(jobs) do
+          local r = j:wait(60000)
+          H.eq(0, r.code, "worker " .. id .. ": " .. tostring(r.stderr))
+        end
+        local dir = state .. (vim.fn.has("win32") == 1 and "/nvim-data" or "/nvim")
+        local f = assert(io.open(dir .. "/rust-context.json"))
+        local all = vim.json.decode(f:read("*a"))
+        f:close()
+        H.eq(120, vim.tbl_count(all), "every worker's keys are in the file")
+        H.eq(0, vim.fn.filereadable(dir .. "/rust-context.json.lock"), "lock released")
       end
-      for id, j in ipairs(jobs) do
-        local r = j:wait(60000)
-        H.eq(0, r.code, "worker " .. id .. ": " .. tostring(r.stderr))
-      end
-      local dir = state .. (vim.fn.has("win32") == 1 and "/nvim-data" or "/nvim")
-      local f = assert(io.open(dir .. "/rust-context.json"))
-      local all = vim.json.decode(f:read("*a"))
-      f:close()
-      H.eq(120, vim.tbl_count(all), "every worker's keys are in the file")
-      H.eq(0, vim.fn.filereadable(dir .. "/rust-context.json.lock"), "lock released")
-    end)
+    )
 
     it("holds { [root] = ctx } under stdpath('state')", function()
       H.eq(vim.fn.stdpath("state") .. "/rust-context.json", state_file)
@@ -559,14 +579,17 @@ end
       buf_named(ws .. "/app/src/main.rs")
       local cap = notes()
       vim.cmd("RustContext show")
+      H.drain()
       H.eq("Rust context: all features, host target", cap.list[#cap.list].msg)
       rc.apply(ws, { all = false, features = { "csr" }, target = "t" })
       vim.cmd("RustContext show")
+      H.drain()
       H.eq("Rust context: features: csr | target: t", cap.list[#cap.list].msg)
       -- outside a crate: a warning, not a made-up "all features"
       buf_named(H.tmpdir() .. "/notes.txt")
       local n = #cap.list
       vim.cmd("RustContext show")
+      H.drain()
       H.eq(n + 1, #cap.list)
       H.eq({ msg = "no Cargo.toml found", level = vim.log.levels.WARN }, cap.list[#cap.list])
     end)
@@ -585,8 +608,10 @@ end
       end)
       local cap = notes()
       vim.cmd("RustContext reset")
+      H.drain()
       H.eq({ "reset" }, calls)
       vim.cmd("RustContext")
+      H.drain()
       H.eq({ "reset", "pick" }, calls)
       vim.cmd("RustContext bogus")
       vim.cmd("RustContext resett")
@@ -609,8 +634,10 @@ end
         rc.reset, rc.pick = orig_reset, orig_pick
       end)
       vim.cmd("RustContext reset")
+      H.drain()
       H.eq({ "reset" }, calls)
       vim.cmd("RustContext")
+      H.drain()
       H.eq({ "reset", "pick" }, calls)
     end)
 
@@ -621,6 +648,7 @@ end
       rc.apply(ws, { all = false, features = { "csr" } })
       rc.apply("/r/other", { all = false, features = { "x" } })
       vim.cmd("RustContext reset")
+      H.drain()
       H.is_nil(rc.get(ws))
       H.eq({ all = false, features = { "x" } }, rc.get("/r/other"))
     end)
@@ -629,6 +657,7 @@ end
       buf_named(H.tmpdir() .. "/notes.txt")
       local cap = notes()
       vim.cmd("RustContext reset")
+      H.drain()
       H.eq({ { msg = "no Cargo.toml found: nothing to reset", level = vim.log.levels.WARN } }, cap.list)
       H.is_nil(read_text(state_file), "nothing written")
     end)
@@ -638,6 +667,7 @@ end
       local cap = notes()
       local picker = stub_picker()
       vim.cmd("RustContext")
+      H.drain()
       H.eq({ { msg = "no Cargo.toml found", level = vim.log.levels.WARN } }, cap.list)
       H.is_nil(picker.opts, "no picker opened")
     end)
@@ -652,7 +682,7 @@ end
       end
     end
 
-    it("reads `cargo metadata --no-deps` in the root with a 30 s wait", function()
+    it("reads `cargo metadata --no-deps` in the root asynchronously with a 30 s timeout", function()
       local ws = H.fixture("workspace")
       buf_named(ws .. "/app/src/main.rs")
       stub_picker()
@@ -662,6 +692,7 @@ end
         end,
       })
       rc.pick()
+      H.drain()
       -- (root() may also ask `cargo locate-project`: not what is checked here)
       calls = vim.tbl_filter(function(c)
         return c.cmd[2] == "metadata"
@@ -669,7 +700,9 @@ end
       H.eq(1, #calls)
       H.eq({ "cargo", "metadata", "--format-version", "1", "--no-deps" }, calls[1].cmd)
       H.eq(ws, calls[1].opts.cwd)
-      H.eq(30000, calls[1].wait)
+      H.ok(calls[1].async, "the main thread does not wait for cargo")
+      H.is_nil(calls[1].wait, "and :wait() is never called")
+      H.eq(30000, calls[1].opts.timeout)
     end)
 
     it("notifies an ERROR when cargo metadata fails", function()
@@ -679,6 +712,7 @@ end
       local cap = notes()
       local picker = stub_picker()
       rc.pick()
+      H.drain()
       H.eq(1, #cap.list)
       H.eq(vim.log.levels.ERROR, cap.list[1].level)
       H.match(cap.list[1].msg, "^cargo metadata failed: ")
@@ -692,6 +726,7 @@ end
         end,
       })
       rc.pick()
+      H.drain()
       H.eq({ { msg = "cargo metadata failed: boom", level = vim.log.levels.ERROR } }, cap.list)
     end)
 
@@ -701,6 +736,7 @@ end
       buf_named(ws .. "/app/src/main.rs")
       local picker = stub_picker()
       rc.pick()
+      H.drain()
       local texts = vim.tbl_map(function(i)
         return i.text
       end, picker.opts.items)
@@ -716,15 +752,25 @@ end
 
     it("does not prefix features of a single-package crate and sorts them", function()
       need_cargo()
-      local dir = crate('[package]\nname = "solo"\nversion = "0.1.0"\nedition = "2021"\n'
-        .. "[features]\ndefault = []\nzeta = []\nalpha = []\nmid = [\"alpha\"]\n")
+      local dir = crate(
+        '[package]\nname = "solo"\nversion = "0.1.0"\nedition = "2021"\n'
+          .. '[features]\ndefault = []\nzeta = []\nalpha = []\nmid = ["alpha"]\n'
+      )
       buf_named(dir .. "/src/lib.rs")
       local picker = stub_picker()
       rc.pick()
+      H.drain()
       local texts = vim.tbl_map(function(i)
         return i.text
       end, picker.opts.items)
-      H.eq({ "* all features", "* default features only (clears the list)", "* no-default-features", "alpha", "mid", "zeta" }, texts)
+      H.eq({
+        "* all features",
+        "* default features only (clears the list)",
+        "* no-default-features",
+        "alpha",
+        "mid",
+        "zeta",
+      }, texts)
     end)
 
     it("shows the stored context in the title", function()
@@ -735,6 +781,7 @@ end
       rc.apply(ws, { all = false, features = { "csr" }, target = "wasm32-unknown-unknown" })
       local picker = stub_picker()
       rc.pick()
+      H.drain()
       H.eq(
         "Cargo features (<Tab> multi-select) - now: features: csr | target: wasm32-unknown-unknown",
         picker.opts.title
@@ -754,6 +801,7 @@ end
       })
       local select = stub_select()
       rc.pick()
+      H.drain()
       local p = fake_picker(picker, { "core-lib/ssr", "* no-default-features" })
       picker.opts.confirm(p)
       H.ok(p.closed, "picker closed on confirm")
@@ -785,6 +833,7 @@ end
       })
       local select = stub_select()
       rc.pick()
+      H.drain()
       -- fallback selection: picker:selected({fallback=true}) may hand back the cursor item
       picker.opts.confirm(fake_picker(picker, { "* all features" }))
       H.wait_for(function()
@@ -813,6 +862,7 @@ end
       })
       local select = stub_select()
       rc.pick()
+      H.drain()
       picker.opts.confirm(fake_picker(picker, { "core-lib/csr" }))
       H.wait_for(function()
         return select.call
@@ -879,7 +929,12 @@ describe("rust_context with live servers", function()
       cmd = { "rust-analyzer" },
       root_dir = basic,
       settings = { ["rust-analyzer"] = { cargo = {} } },
-    }, { bufnr = sbuf, reuse_client = function() return false end })
+    }, {
+      bufnr = sbuf,
+      reuse_client = function()
+        return false
+      end,
+    })
     local other = H.ok(vim.lsp.get_client_by_id(other_id), "second rust-analyzer client")
     H.ok(other.id ~= s.ra.id)
     s.ra.settings["rust-analyzer"].cargo.target = "stale-target" -- must be cleared by a nil target
@@ -929,7 +984,7 @@ describe("rust_context with live servers", function()
     H.known_issue({ "windows" }, "live rust-analyzer flows fail or hang on Windows in the xynovim CI; not diagnosed")
     local s = live()
     H.wait_for(function()
-      return conflict(s.buf, "rust-analyzer") 
+      return conflict(s.buf, "rust-analyzer")
     end, 90000, "the compile_error before the change")
     notes()
 
@@ -954,7 +1009,10 @@ describe("rust_context with live servers", function()
     local fake = {
       name = "rust-analyzer",
       config = { root_dir = first },
-      workspace_folders = { { name = first, uri = vim.uri_from_fname(first) }, { name = second, uri = vim.uri_from_fname(second) } },
+      workspace_folders = {
+        { name = first, uri = vim.uri_from_fname(first) },
+        { name = second, uri = vim.uri_from_fname(second) },
+      },
       settings = { ["rust-analyzer"] = { cargo = { allFeatures = true } } },
       notify = function(_, method)
         sent[#sent + 1] = method
@@ -1008,6 +1066,7 @@ describe("rust_context with live servers", function()
     local select = stub_select()
     vim.api.nvim_set_current_buf(s.buf)
     rc.pick()
+    H.drain()
     picker.opts.confirm(fake_picker(picker, { "* all features" }))
     H.wait_for(function()
       return select.call
@@ -1021,6 +1080,7 @@ describe("rust_context with live servers", function()
 
     vim.api.nvim_set_current_buf(s.buf)
     vim.cmd("RustContext reset")
+    H.drain()
     H.is_nil(ra_cargo().target)
     H.is_nil(state()[s.root])
   end)

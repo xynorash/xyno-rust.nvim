@@ -139,6 +139,22 @@ function H.wait_for(pred, timeout_ms, msg)
   return value
 end
 
+--- Let the plugin's background work finish: no cargo/rustup process running and no route scan,
+--- for 30 ms in a row (callbacks of cache hits are one loop turn away).
+function H.drain(timeout_ms)
+  local quiet = 0
+  local ok = vim.wait(timeout_ms or 20000, function()
+    local busy = require("xyno_rust.cargo").pending() > 0
+    local routes = package.loaded["xyno_rust.rust_routes"]
+    busy = busy or (routes and routes.pending() > 0)
+    quiet = busy and 0 or quiet + 1
+    return quiet >= 3
+  end, 10)
+  if not ok then
+    fail("background work did not finish", 2)
+  end
+end
+
 function H.clients(bufnr, name)
   return vim.lsp.get_clients({ bufnr = bufnr, name = name })
 end

@@ -1,0 +1,5 @@
+main;hot::spin 5
+main;hot::fib;hot::fib;hot::fib 2
+main;hot::fib;hot::fib 1
+main;<alloc::vec::Vec<T> as core::ops::drop::Drop>::drop 1
+main;[unknown] 1
