@@ -50,7 +50,7 @@ local function read(path)
   if not fd then
     return nil
   end
-  local t = fd:read(1 << 20)
+  local t = fd:read(1048576) -- 1 MiB (no `<<`: LuaJIT has no bit operators in the syntax)
   fd:close()
   return t
 end

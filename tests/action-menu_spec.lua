@@ -98,7 +98,13 @@ describe("menu on a real rust-analyzer", function()
     dir, buf = H.open_fixture("fix-lab", "src/lib.rs")
     H.start_ra(buf, dir)
     H.wait_for(function()
-      return #vim.diagnostic.get(buf) >= 2
+      local n = 0
+      for _, d in ipairs(vim.diagnostic.get(buf)) do
+        if d.message:find("unused import", 1, true) then
+          n = n + 1
+        end
+      end
+      return n >= 2 -- both unused imports (the fix-all spec needs both, not just any two diagnostics)
     end, 90000, "diagnostics")
   end
 

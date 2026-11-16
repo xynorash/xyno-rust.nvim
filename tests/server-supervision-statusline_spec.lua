@@ -535,6 +535,15 @@ describe("rust_restart: VimLeavePre kill of servers that never initialised", fun
     local dir = H.tmpdir()
     local exe = dir .. "/" .. name
     vim.uv.fs_symlink(vim.fn.exepath("sleep"), exe)
+    -- a multicall coreutils (uutils on newer distributions) refuses an unknown applet name: then the
+    -- "server" is a shell script of that name (the kernel names the process after the script)
+    if vim.system({ exe, "0" }):wait().code ~= 0 then
+      vim.uv.fs_unlink(exe)
+      local f = assert(io.open(exe, "w"))
+      f:write("#!/bin/sh\nsleep 60\n")
+      f:close()
+      vim.uv.fs_chmod(exe, 493) -- 0755
+    end
     return exe
   end
   local function spawn(name)
